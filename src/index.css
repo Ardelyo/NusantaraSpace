@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+canvas { outline: none; }
+
+@keyframes heatflick {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25) saturate(1.2); }
+}
+.heat-fx { animation: heatflick 0.18s infinite; mix-blend-mode: screen; }
+
+@keyframes warnpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.warn-pulse { animation: warnpulse 0.6s infinite; }
+
+@keyframes toastin {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.toast-in { animation: toastin 0.25s ease-out; }
+
+@keyframes promptglow {
+  0%, 100% { box-shadow: 0 0 14px rgba(255, 190, 60, 0.45); }
+  50% { box-shadow: 0 0 30px rgba(255, 190, 60, 0.85); }
+}
+.prompt-glow { animation: promptglow 1.4s infinite; }
+
+@keyframes quake {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-4px, 3px); }
+  50% { transform: translate(3px, -4px); }
+  75% { transform: translate(-3px, -2px); }
+  100% { transform: translate(0, 0); }
+}
+
+@keyframes radnoise {
+  0% { background-position: 0 0, 0 0; }
+  50% { background-position: 7px 13px, -9px 4px; }
+  100% { background-position: 0 0, 0 0; }
+}
+.rad-fx {
+  mix-blend-mode: screen;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.10) 0 1px, rgba(0,0,0,0) 1px 3px),
+    radial-gradient(ellipse at 50% 50%, rgba(255,230,160,0.12), rgba(255,140,40,0.35));
+  animation: radnoise 0.12s steps(2) infinite;
+}
+
+@keyframes powerlow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.power-low {
+  background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.05), rgba(40,0,0,0.8));
+  animation: powerlow 0.5s infinite;
+}
