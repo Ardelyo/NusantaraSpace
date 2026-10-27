@@ -633,7 +633,11 @@ export class Habitat {
   body: Body | null = null;
   dirL = new THREE.Vector3(0, 1, 0);
   yaw = 0;
-  stOffset = new THREE.Vector3();
+  stOffset = new THREE.Vector3(); // posisi awal relatif pusat Bumi (menentukan jari-jari & bidang orbit)
+  vel = new THREE.Vector3(); // kecepatan inersia (m/s)
+  private orbE1 = new THREE.Vector3(1, 0, 0);
+  private orbE2 = new THREE.Vector3(0, 0, 1);
+  private orbBasis = new THREE.Matrix4();
   mods = new Map<string, PlacedMod>();
   pos = new THREE.Vector3();
   quat = new THREE.Quaternion();
@@ -660,6 +664,7 @@ export class Habitat {
   dockExt = 0;
   private tube: THREE.Mesh | null = null;
   private tmpV = new THREE.Vector3();
+  private tmpV2 = new THREE.Vector3();
   private tmpQ = new THREE.Quaternion();
 
   constructor(id: string, name: string, kind: 'station' | 'base') {
@@ -924,7 +929,7 @@ export class Habitat {
   }
 
   // ----- pose dunia
-  updatePose(origin: THREE.Vector3, bumi: Body | null, sunPos: THREE.Vector3) {
+  updatePose(origin: THREE.Vector3, bumi: Body | null, sunPos: THREE.Vector3, time = 0) {
     if (this.kind === 'base' && this.body) {
       this.localPos.copy(this.dirL).multiplyScalar(this.body.surfaceRadius(this.dirL) - 0.05);
       this.localQuat.setFromUnitVectors(this.tmpV.set(0, 1, 0), this.dirL);
@@ -933,9 +938,24 @@ export class Habitat {
       this.pos.copy(this.localPos).applyQuaternion(this.body.quat).add(this.body.pos);
       this.quat.copy(this.body.quat).multiply(this.localQuat);
     } else if (bumi) {
-      this.pos.copy(bumi.pos).add(this.stOffset);
-      this.quat.setFromAxisAngle(this.tmpV.set(0, 1, 0), 0.9);
+      // orbit lingkaran Kepler mengelilingi Bumi: ω = √(μ/r³); orientasi LVLH (lantai menghadap Bumi)
+      const r = this.stOffset.length();
+      if (r > 0) {
+        this.orbE1.copy(this.stOffset).divideScalar(r);
+        this.orbE2.set(0.12, 1, 0.02).normalize().cross(this.orbE1).normalize();
+        const w = Math.sqrt(bumi.mu / (r * r * r));
+        const th = w * time;
+        const c = Math.cos(th), sn = Math.sin(th);
+        const radial = this.tmpV.copy(this.orbE1).multiplyScalar(c).addScaledVector(this.orbE2, sn);
+        this.pos.copy(bumi.pos).addScaledVector(radial, r);
+        const tang = new THREE.Vector3().copy(this.orbE1).multiplyScalar(-sn).addScaledVector(this.orbE2, c);
+        this.vel.copy(bumi.vel).addScaledVector(tang, r * w);
+        const z = new THREE.Vector3().copy(tang).cross(radial).normalize();
+        this.orbBasis.makeBasis(tang, radial, z);
+        this.quat.setFromRotationMatrix(this.orbBasis);
+      }
     }
+    if (this.kind === 'base' && this.body) this.vel.copy(this.body.vel).add(this.tmpV.copy(this.body.omegaVec).cross(this.tmpV2.copy(this.pos).sub(this.body.pos)));
     if (this.kind === 'base') { this.ext.position.copy(this.localPos); this.ext.quaternion.copy(this.localQuat); }
     const d = this.pos.distanceTo(sunPos);
     this.sunFactor = Math.min(2.5, Math.max(0.04, Math.pow(9.5e6 / Math.max(d, 1e6), 2)));

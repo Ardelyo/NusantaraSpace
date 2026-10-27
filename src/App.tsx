@@ -35,6 +35,14 @@ function TapBtn({ onTap, children, className = '', active = false }: { onTap: ()
   );
 }
 
+const fmtClock = (sec: number) => {
+  if (!isFinite(sec) || sec <= 0) return '—';
+  if (sec >= 86400) return `${(sec / 86400).toFixed(1)} hr`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return h > 0 ? `${h}j ${m}m` : `${m}:${String(s).padStart(2, '0')}`;
+};
+const nextWarp = (w: number) => ([1, 5, 25, 100, 500, 2000][([1, 5, 25, 100, 500, 2000].indexOf(w) + 1) % 6]);
+
 const Key = ({ k }: { k: string }) => <kbd className="mx-0.5 rounded border border-white/30 bg-white/10 px-1 py-px font-mono text-[10px] text-white">{k}</kbd>;
 
 export default function App() {
@@ -231,7 +239,7 @@ export default function App() {
 
   const hint = (() => {
     if (!pc) return null;
-    if (pilot) return <><Key k="W/S" /><Key k="A/D" />kemudi <Key k="Q/E" />roll <Key k="Shift/Ctrl" />atau <Key k="roda" />daya <Key k="X" />rem <Key k="B" />turbo <Key k="P" />auto <Key k="U" />sandar <Key k="T" />berdiri</>;
+    if (pilot) return <><Key k="W/S" /><Key k="A/D" />kemudi <Key k="Q/E" />roll <Key k="Shift/Ctrl" />atau <Key k="roda" />daya <Key k="X" />rem <Key k="B" />turbo <Key k="P" />auto <Key k="Y" />tahan <Key k="I" />darat <Key k="," /><Key k="." />waktu <Key k="U" />sandar</>;
     if (riding) return <><Key k="W/S" />gas <Key k="A/D" />belok <Key k="B" />turbo <Key k="mouse" />kamera <Key k="R" />turun</>;
     if (eva) return <><Key k="WASD" />jalan <Key k="Shift" />lari <Key k="Spasi" />lompat/jet <Key k="C" />turun <Key k="F" />aksi <Key k="R" />rover <Key k="K" />basecamp <Key k="G" />bendera <Key k="O" />tarik</>;
     if (walk) return <><Key k="WASD" />jalan <Key k="Shift" />lari <Key k="Spasi" />lompat <Key k="F" />aksi {inHab ? <><Key k="H" />konsol modul</> : <><Key k="T" />duduk</>}</>;
@@ -285,6 +293,26 @@ export default function App() {
                   <div className="mt-1 text-[10px] text-white/50">g {h.gravity.toFixed(2)} m/s²</div>
                 </div>
               )}
+              {(pilot || mode === 'walk') && (
+                <div className="mt-1 w-28">
+                  {h.orbit.valid && (
+                    <div className="mb-1 text-[9.5px] leading-tight text-cyan-100/70">
+                      {h.orbit.state === 'orbit' ? `ORBIT ${h.orbit.primary}` : h.orbit.state === 'lepas' ? `LINTASAN LEPAS · ${h.orbit.primary}` : `SUBORBITAL · ${h.orbit.primary}`}<br />
+                      Pe {fmtDist(Math.max(0, h.orbit.pe - h.primaryR))}{h.orbit.state !== 'lepas' && <> · Ap {fmtDist(Math.max(0, h.orbit.ap - h.primaryR))}</>}
+                      {h.orbit.state === 'orbit' && <><br />T {fmtClock(h.orbit.T)}</>}
+                    </div>
+                  )}
+                  <div className="text-[9px] tracking-widest text-amber-200/70">BBM {Math.round(h.fuel * 100)}%</div>
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-white/15"><div className={`h-full ${h.fuel < 0.15 ? 'bg-red-400' : 'bg-amber-300'}`} style={{ width: `${h.fuel * 100}%` }} /></div>
+                  <div className="mt-1 text-[9px] tracking-widest text-emerald-200/70">LAMBUNG {Math.round(h.hull * 100)}%</div>
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-white/15"><div className={`h-full ${h.hull < 0.4 ? 'bg-red-400' : 'bg-emerald-300'}`} style={{ width: `${h.hull * 100}%` }} /></div>
+                  <div className={`mt-1 text-[9.5px] ${h.skinT > 1500 ? 'text-red-300' : 'text-white/50'}`}>kulit {Math.round(h.skinT - 273.15)}°C</div>
+                  <div className={`text-[9.5px] ${h.cabinT > 320 ? 'text-red-300' : 'text-white/50'}`}>kabin {Math.round(h.cabinT - 273.15)}°C{h.gForce > 0.5 ? ` · ${h.gForce.toFixed(1)}g` : ''}</div>
+                </div>
+              )}
+              {eva && h.jetDv < 150 && (
+                <div className="text-[9.5px] text-sky-200/60">jet Δv {Math.round(h.jetDv)} m/s</div>
+              )}
               {inHab && (
                 <div className="mt-1 w-28">
                   <div className="text-[9px] tracking-widest text-emerald-200/70">DAYA {Math.round(h.power * 100)}%</div>
@@ -333,6 +361,8 @@ export default function App() {
               </div>
             )}
             {h.link && pilot && <div className="max-w-full truncate rounded-full border border-emerald-300/50 bg-emerald-900/45 px-3 py-1 font-mono text-[11px] text-emerald-100">⚓ {h.link.docked ? 'Tersandar' : 'Dekat'}: {h.link.name}</div>}
+            {h.warpNow > 1 && <div className="rounded-full border border-fuchsia-300/60 bg-fuchsia-900/45 px-3 py-1 font-mono text-[11px] text-fuchsia-100">⏩ waktu ×{h.warpNow}</div>}
+            {pilot && (h.hold || h.landAssist) && <div className="rounded-full border border-emerald-300/50 bg-emerald-900/45 px-3 py-1 font-mono text-[11px] text-emerald-100">{h.landAssist ? '⬇ pendaratan otomatis' : '✋ tahan posisi'}</div>}
             {h.scanning && <div className="rounded-full border border-cyan-300/50 bg-cyan-900/45 px-3 py-1 font-mono text-[11px] text-cyan-100">⌖ Memindai…</div>}
             {toasts.map((t) => (
               <div key={t.id} className={`toast-in w-full max-w-md rounded-2xl border px-3 py-1.5 text-center text-[13px] leading-snug backdrop-blur ${t.kind === 'discover' ? 'border-amber-300/60 bg-amber-500/25 text-amber-100' : t.kind === 'warn' ? 'border-red-400/50 bg-red-900/50 text-red-100' : 'border-cyan-300/30 bg-black/60 text-cyan-50'}`}>{t.text}</div>
@@ -377,14 +407,14 @@ export default function App() {
               <div className="pb-1 font-mono text-[10px] leading-tight text-cyan-100/80">
                 DAYA<br /><span className="text-base text-white">{Math.round(h.throttle * 100)}%</span><br />
                 <span className="text-white/40">{pc ? 'roda mouse' : 'geser ↑↓'}</span><br />
-                <span className="text-white/40">batas {fmtSpeed(h.limit)}</span>
+                <span className="text-white/40">a maks {h.limit.toFixed(0)} m/s²</span>
               </div>
             </div>
           )}
 
           {/* tombol kanan */}
           {showCtl && (
-            <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-2.5">
+            <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] right-3 z-20 flex max-h-[calc(100dvh-190px)] flex-col flex-wrap-reverse content-end items-center gap-2">
               {pilot && (
                 <>
                   <div className="flex flex-col gap-2">
@@ -394,6 +424,13 @@ export default function App() {
                   </div>
                   {(h.canDock || h.link?.docked) && (
                     <TapBtn onTap={() => eng().dockToggle()} active={!!h.link?.docked} className="h-14 w-14 flex-col text-[10px] font-mono leading-none"><span className="text-lg">⚓</span>{h.link?.docked ? 'LEPAS' : 'SANDAR'}</TapBtn>
+                  )}
+                  {!h.link?.docked && (
+                    <>
+                      <TapBtn onTap={() => eng().toggleHold()} active={h.hold} className="h-12 w-12 flex-col text-[9px] font-mono leading-none"><span className="text-base">✋</span>TAHAN</TapBtn>
+                      <TapBtn onTap={() => eng().toggleLandAssist()} active={h.landAssist} className="h-12 w-12 flex-col text-[9px] font-mono leading-none"><span className="text-base">⬇</span>DARAT</TapBtn>
+                      <TapBtn onTap={() => eng().setWarp(nextWarp(h.warp))} active={h.warp > 1} className="h-12 w-12 flex-col text-[9px] font-mono leading-none"><span className="text-base">⏩</span>×{h.warp}</TapBtn>
+                    </>
                   )}
                   {h.target && !h.link?.docked && (
                     <TapBtn onTap={() => (h.autopilot ? eng().cancelAutopilot() : eng().engageAutopilot())} active={h.autopilot} className="h-14 w-14 flex-col text-[10px] font-mono leading-none"><span className="text-lg">⌖</span>AUTO</TapBtn>

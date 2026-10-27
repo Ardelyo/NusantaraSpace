@@ -37,10 +37,18 @@ export interface AtmosphereData {
   T0: number; // K di permukaan
   lapse: number; // K/m (penurunan suhu terhadap ketinggian)
   Tmin: number; // K batas bawah suhu
+  table?: [number, number][]; // [ketinggian m, kerapatan kg/m³] bila tersedia (log-interpolasi)
 }
 
+/** Atmosfer Standar AS 1976 (kerapatan, kg/m³) */
+const EARTH_TABLE: [number, number][] = [
+  [0, 1.225], [5e3, 0.7364], [10e3, 0.4135], [15e3, 0.1948], [20e3, 0.08891], [25e3, 0.04008], [30e3, 0.01841], [40e3, 3.996e-3],
+  [50e3, 1.027e-3], [60e3, 3.097e-4], [70e3, 8.283e-5], [80e3, 1.846e-5], [90e3, 3.416e-6], [100e3, 5.604e-7], [110e3, 9.708e-8],
+  [120e3, 2.222e-8], [130e3, 8.152e-9], [140e3, 3.831e-9], [150e3, 2.076e-9], [200e3, 2.541e-10],
+];
+
 export const ATMOSPHERES: Record<string, AtmosphereData> = {
-  bumi: { rho0: 1.225, H: 8500, T0: 288, lapse: 6.5e-3, Tmin: 217 },
+  bumi: { rho0: 1.225, H: 8500, T0: 288, lapse: 6.5e-3, Tmin: 217, table: EARTH_TABLE },
   venus: { rho0: 65, H: 15900, T0: 737, lapse: 8.0e-3, Tmin: 170 },
   mars: { rho0: 0.0155, H: 11100, T0: 210, lapse: 2.5e-3, Tmin: 130 },
   titan: { rho0: 5.3, H: 20000, T0: 94, lapse: 1.0e-3, Tmin: 70 },
@@ -58,9 +66,22 @@ export function generatedAtmosphere(seed: number): AtmosphereData {
   return { rho0: 0.3 + 2.2 * r, H: 6500 + 6000 * r2, T0: 230 + 90 * r2, lapse: 5e-3, Tmin: 150 };
 }
 
-export const atmDensity = (a: AtmosphereData, alt: number) => a.rho0 * Math.exp(-alt / a.H);
+export function atmDensity(a: AtmosphereData, alt: number): number {
+  const t = a.table;
+  if (t) {
+    if (alt <= 0) return a.rho0 * Math.exp(-alt / a.H);
+    const last = t[t.length - 1];
+    if (alt >= last[0]) return last[1] * Math.exp(-(alt - last[0]) / 40e3);
+    let i = 1;
+    while (t[i][0] < alt) i++;
+    const [h0, r0] = t[i - 1], [h1, r1] = t[i];
+    const f = (alt - h0) / (h1 - h0);
+    return Math.exp(Math.log(r0) * (1 - f) + Math.log(r1) * f);
+  }
+  return a.rho0 * Math.exp(-alt / a.H);
+}
 /** Tekanan hidrostatik isoterm: P = ρ g H */
-export const atmPressure = (a: AtmosphereData, g: number, alt: number) => atmDensity(a, alt) * g * a.H;
+export const atmPressure = (a: AtmosphereData, g: number, alt: number) => a.rho0 * Math.exp(-alt / a.H) * g * a.H;
 export const atmTemperature = (a: AtmosphereData, alt: number) => Math.max(a.Tmin, a.T0 - a.lapse * Math.max(alt, 0));
 
 /** ½ρv² */

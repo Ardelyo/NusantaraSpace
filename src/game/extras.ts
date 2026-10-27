@@ -178,7 +178,8 @@ const CELL = 100000;
 export class AsteroidBelt {
   mesh: THREE.InstancedMesh;
   far: THREE.Points;
-  rocks: { x: number; y: number; z: number; r: number }[] = [];
+  rocks: { x: number; y: number; z: number; r: number; vx: number; vy: number; vz: number }[] = [];
+  omega = 0; // kecepatan sudut sabuk mengelilingi Matahari (rad/s), dari Kepler
   inside = false;
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -216,7 +217,7 @@ export class AsteroidBelt {
     scene.add(this.far);
   }
 
-  update(origin: THREE.Vector3) {
+  update(origin: THREE.Vector3, time = 0) {
     this.far.position.set(-origin.x, -origin.y, -origin.z);
     const rr = Math.hypot(origin.x, origin.z);
     this.inside = rr > 15.2e6 && rr < 19.8e6 && Math.abs(origin.y) < 1.4e6;
@@ -225,7 +226,10 @@ export class AsteroidBelt {
       this.mesh.count = 0;
       return;
     }
-    const cx = Math.floor(origin.x / CELL), cy = Math.floor(origin.y / CELL), cz = Math.floor(origin.z / CELL);
+    // bingkai berputar bersama sabuk (rotasi kaku dengan ω Kepler): batu mengorbit, bukan diam
+    const th = this.omega * time, ct = Math.cos(th), st = Math.sin(th);
+    const bx = origin.x * ct + origin.z * st, bz = -origin.x * st + origin.z * ct; // rotasi −θ
+    const cx = Math.floor(bx / CELL), cy = Math.floor(origin.y / CELL), cz = Math.floor(bz / CELL);
     let n = 0;
     for (let k = -3; k <= 3; k++) for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) {
       if (n >= 300) break;
@@ -237,7 +241,8 @@ export class AsteroidBelt {
       if (h > 0.6 * prof) continue;
       const h5 = hash3(ix, iy, iz, 5);
       const rad = 180 + h5 * h5 * h5 * 4800;
-      this.p.set(x - origin.x, y - origin.y, z - origin.z);
+      const wx = x * ct - z * st, wz = x * st + z * ct; // rotasi +θ → koordinat dunia
+      this.p.set(wx - origin.x, y - origin.y, wz - origin.z);
       this.e.set(h * 40, h5 * 30, h * h5 * 50);
       this.q.setFromEuler(this.e);
       this.s.set(rad, rad, rad);
@@ -245,7 +250,7 @@ export class AsteroidBelt {
       this.mesh.setMatrixAt(n, this.m);
       const tone = 0.35 + hash3(ix, iy, iz, 6) * 0.35;
       this.mesh.setColorAt(n, this.c.setRGB(tone * 1.05, tone * 0.95, tone * 0.85));
-      this.rocks.push({ x, y, z, r: rad * 0.95 });
+      this.rocks.push({ x: wx, y, z: wz, r: rad * 0.95, vx: -this.omega * wz, vy: 0, vz: this.omega * wx });
       n++;
     }
     this.mesh.count = n;

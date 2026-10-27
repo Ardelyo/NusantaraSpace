@@ -65,6 +65,15 @@ t('Atmosfer: tekanan permukaan Bumi ≈ 1 bar, Venus ≈ 92 bar, Mars ≈ 6 mbar
   near(P.atmPressure(P.ATMOSPHERES.jupiter, 24.8, 0), 1.07e5, 0.05, 'Jupiter 1 bar');
 });
 
+t('Atmosfer Bumi: tabel AS-1976 (100 km = 5,6e-7; 80 km = 1,85e-5)', () => {
+  near(P.atmDensity(P.ATMOSPHERES.bumi, 100e3), 5.604e-7, 1e-9, '100 km');
+  near(P.atmDensity(P.ATMOSPHERES.bumi, 80e3), 1.846e-5, 1e-9, '80 km');
+  near(P.atmDensity(P.ATMOSPHERES.bumi, 0), 1.225, 1e-9, '0 km');
+  let prev = Infinity;
+  for (let h = 0; h < 400e3; h += 2e3) { const r = P.atmDensity(P.ATMOSPHERES.bumi, h); assert.ok(r < prev, 'monoton turun'); prev = r; }
+  n += 1;
+});
+
 t('Drag: kecepatan terminal Bumi & tekanan dinamis', () => {
   const vt = P.terminalVelocity(P.SHIP.mass, 9.8, 1.225, P.SHIP.cdA);
   near(vt, 178.9, 0.005, 'terminal ≈ 179 m/s');
