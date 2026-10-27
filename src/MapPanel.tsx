@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Engine, TargetInfo } from './game/engine';
-import { fmtDist } from './game/screens';
+import { fmtDist, fmtSpeed } from './game/screens';
+
+const fmtClock = (sec: number) => (sec >= 86400 ? `${(sec / 86400).toFixed(1)} hr` : sec >= 3600 ? `${(sec / 3600).toFixed(1)} jam` : `${(sec / 60).toFixed(1)} mnt`);
 
 const kindColor = (k: string) => {
   if (k.includes('Bintang')) return '#ffd060';
@@ -75,10 +77,17 @@ export default function MapPanel({
                   <div className="px-3 pb-3 text-[13px] text-white/80">
                     <p className="mb-2 leading-snug text-white/70">{t.info.desc}</p>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[11px] text-cyan-100/80">
-                      <span>Radius: {t.info.radiusKm}</span>
+                      <span>Radius nyata: {t.info.radiusKm}</span>
+                      <span>Radius skala game: {fmtDist(t.radius)}</span>
                       <span>Gravitasi: {t.info.gravity}</span>
                       <span>Suhu: {t.info.temp}</span>
                       <span>Atmosfer: {t.info.atm}</span>
+                      {t.circV !== undefined && <span>Orbit rendah: {fmtSpeed(t.circV)}</span>}
+                      {t.escV !== undefined && <span>Kec. lepas: {fmtSpeed(t.escV)}</span>}
+                      {t.tSurf !== undefined && <span>Suhu permukaan: {Math.round(t.tSurf - 273.15)} °C</span>}
+                      {t.pSurf !== undefined && <span>Tekanan: {t.pSurf >= 1000 ? (t.pSurf / 1000).toFixed(t.pSurf > 1e5 ? 0 : 1) + ' kPa' : Math.round(t.pSurf) + ' Pa'}</span>}
+                      {t.period !== undefined && <span>Periode orbit: {fmtClock(t.period)}</span>}
+                      {t.soi !== undefined && <span>Bola pengaruh: {fmtDist(t.soi)}</span>}
                       {t.life && <span className="col-span-2">Kehidupan: <b className={t.life === 'Tidak ada' ? 'text-white/60' : 'text-emerald-300'}>{t.life}</b></span>}
                       {t.hazards && <span className="col-span-2">Bahaya: <b className="text-amber-200">{t.hazards.join(' · ')}</b></span>}
                     </div>

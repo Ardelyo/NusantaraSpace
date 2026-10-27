@@ -151,17 +151,31 @@ export class LifeField {
     const rad = body.surfaceRadius(d);
     const s = body.tmpS;
     if (s.water) return null;
+    const lat = s.lat, el = s.e, moist = s.m, tn = s.tn;
     const r1 = hash3(i, j, f, seed + 3), r2 = hash3(i, j, f, seed + 4), r3 = hash3(i, j, f, seed + 5), r4 = hash3(i, j, f, seed + 6);
-    const temp = 1 - s.lat * 1.18 - Math.max(s.e, 0) * 0.55 + s.tn * 0.18;
+    // suhu relatif (0 beku … 1 hangat): lintang, ketinggian (laju lapse), dan suhu dasar dunia
+    const base = p.T0 !== undefined ? clamp((p.T0 - 255) / 45) : 0.7;
+    const temp = base - lat * 1.18 * (0.55 + 0.45 * base) - Math.max(el, 0) * 0.55 + tn * 0.18;
     const earth = !p.alien;
+    // kemiringan: tumbuhan tak tumbuh di tebing, hewan menghindari lereng curam
+    const st = 7 / body.R;
+    const e1s = new THREE.Vector3().copy(d).cross(Math.abs(d.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
+    const e2s = new THREE.Vector3().copy(d).cross(e1s).normalize();
+    const ra = body.surfaceRadius(new THREE.Vector3().copy(d).addScaledVector(e1s, st).normalize());
+    const rb = body.surfaceRadius(new THREE.Vector3().copy(d).addScaledVector(e2s, st).normalize());
+    const slope = Math.hypot(ra - rad, rb - rad) / 7; // tan(sudut)
+    // kepadatan patch: hutan & padang membentuk gerombol, bukan kisi
+    const patch = hash3(Math.floor(i / 7), Math.floor(j / 7), f, seed + 9) * 0.65 + hash3(Math.floor(i / 3), Math.floor(j / 3), f, seed + 10) * 0.35;
+    const fed = clamp((moist - 0.22) * 2.2) * clamp(temp * 1.8); // pakan: tumbuhan butuh air & suhu
     let kind: Kind | null = null;
     let sc = 0.7 + r2 * 0.9;
-    if (p.fauna && r4 < (earth ? 0.05 : 0.07) && s.e < 0.5) { kind = earth ? 'deer' : 'critter'; sc = 0.8 + r2 * 0.5; }
+    if (p.fauna && slope < 0.36 && temp > 0.18 && fed > 0.12 && r4 < (earth ? 0.055 : 0.075) * (0.4 + fed) && el < 0.5) { kind = earth ? 'deer' : 'critter'; sc = 0.8 + r2 * 0.5; }
     else if (p.fauna && r4 > 0.965 && earth) { kind = 'bird'; sc = 0.9 + r2 * 0.4; }
-    else if (p.flora) {
+    else if (p.flora && slope < 0.55) {
       let dens: number;
-      if (earth) dens = clamp((s.m - 0.28) * 1.7) * clamp(temp * 1.6) * (s.e < 0.012 || s.e > 0.5 ? 0 : 1);
-      else dens = 0.55 * (s.e < 0.01 || s.e > 0.6 ? 0 : 1) * (0.5 + 0.5 * Math.sin(a * 800) * Math.cos(b * 700));
+      if (earth) dens = clamp((moist - 0.28) * 1.7) * clamp(temp * 1.6) * (el < 0.012 || el > 0.5 ? 0 : 1);
+      else dens = 0.7 * fed * (el < 0.01 || el > 0.6 ? 0 : 1) * (0.25 + 0.75 * patch);
+      dens *= 0.4 + 0.9 * patch;
       if (r1 < dens) kind = earth ? (temp < 0.42 ? 'cone' : r3 < 0.85 ? 'tree' : 'bush') : (r3 < 0.4 ? 'cone' : r3 < 0.8 ? 'tree' : 'bush');
       else if (r1 < dens + 0.15 && dens > 0.1) kind = 'bush';
     }
@@ -234,8 +248,14 @@ export class LifeField {
       if (it.rho > 0) {
         const ph = it.w + (time * it.speed) / it.rho;
         const ox = Math.cos(ph) * it.rho, oz = Math.sin(ph) * it.rho;
-        dirU = this.v4.copy(d).addScaledVector(it.e1, ox / body.R).addScaledVector(it.e2, oz / body.R).normalize();
-        rad = body.surfaceRadius(dirU) + it.h * (1 + 0.25 * Math.sin(time * 0.7 + it.w));
+        rad = 0;
+        // hewan darat menghindari air: bila jalurnya masuk laut/danau, jarak dari jangkar dikurangi sampai di darat
+        for (const kf of it.h > 0 ? [1] : [1, 0.55, 0.25, 0]) {
+          dirU = this.v4.copy(d).addScaledVector(it.e1, (ox * kf) / body.R).addScaledVector(it.e2, (oz * kf) / body.R).normalize();
+          rad = body.surfaceRadius(dirU);
+          if (it.h > 0 || !body.tmpS.water) break;
+        }
+        rad += it.h * (1 + 0.25 * Math.sin(time * 0.7 + it.w));
         const tx = -Math.sin(ph), tz = Math.cos(ph);
         fwd = this.v5.copy(it.e1).multiplyScalar(tx).addScaledVector(it.e2, tz);
         // ke dunia
@@ -266,7 +286,8 @@ export class LifeField {
         m4.setPosition(px, py, pz);
         if (it.kind === 'bird') {
           // gulingkan saat berbelok
-          m4.multiply(new THREE.Matrix4().makeRotationZ(0.4 * Math.sin(time * 1.3 + it.w)));
+          // sudut guling dari gaya sentripetal: tan φ = v²/(g·r)
+          m4.multiply(new THREE.Matrix4().makeRotationZ(Math.atan((it.speed * it.speed) / (9.8 * it.rho))));
         }
       } else {
         qa.setFromUnitVectors(this.up, nrm);

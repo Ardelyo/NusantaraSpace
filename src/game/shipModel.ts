@@ -35,6 +35,8 @@ export interface ShipRig {
   fans: THREE.Mesh[];
   reactor: THREE.Mesh;
   exteriorOnly: THREE.Object3D[];
+  /** bagian eksterior yang dapat lepas/rusak: id → objek-objeknya */
+  parts: Map<string, THREE.Object3D[]>;
 }
 
 function makeScreen(w = 256, h = 160): Screen {
@@ -60,6 +62,7 @@ export function buildShip(): ShipRig {
   const colliders: Rect[] = [];
   const blinkers: ShipRig['blinkers'] = [];
   const exteriorOnly: THREE.Object3D[] = [];
+  const parts = new Map<string, THREE.Object3D[]>();
 
   const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, p: THREE.Object3D = g) => {
     const me = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
@@ -135,11 +138,13 @@ export function buildShip(): ShipRig {
   // ====== BULKHEAD KOKPIT/KABIN z=-1 ======
   for (const s of [-1, 1]) {
     box(1.4, 2.7, 0.14, s * 1.3, 1.35, -1.0, hull);
-    box(0.06, 2.1, 0.16, s * 0.6, 1.05, -1.0, amber);
+    box(0.05, 2.1, 0.17, s * 0.62, 1.05, -1.0, hullD);
+    sph(0.03, s * 0.6, 2.0, -0.9, amber, g, 6);
     rect(s > 0 ? 0.6 : -2, s > 0 ? 2 : -0.6, -1.12, -0.88);
   }
   box(1.3, 0.62, 0.14, 0, 2.4, -1.0, hull);
-  box(1.3, 0.05, 0.16, 0, 2.1, -1.0, amber);
+  box(1.34, 0.07, 0.17, 0, 2.11, -1.0, hullD);
+
   // layar peta di bulkhead sisi kabin
   const mapScr = makeScreen(320, 200);
   const mapMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.62), new THREE.MeshBasicMaterial({ map: mapScr.tex, toneMapped: false }));
@@ -272,19 +277,26 @@ export function buildShip(): ShipRig {
     holo.add(m);
     holoPlanets.set(id, m);
   }
-  // bunk
-  for (let k = 0; k < 2; k++) {
-    const y = 0.45 + k * 0.95;
-    box(0.95, 0.16, 2.0, -1.5, y, 2.85, hullD);
-    box(0.9, 0.14, 1.9, -1.5, y + 0.14, 2.85, k ? L(0x9fb1c6) : L(0xc9ccd2));
-    box(0.9, 0.1, 1.1, -1.5, y + 0.22, 3.2, k ? fabricB : fabric);
-    box(0.5, 0.1, 0.32, -1.5, y + 0.25, 2.1, L(0xeeeeee));
-    box(0.9, 0.025, 0.04, -1.5, y + 0.38, 1.88, k ? amber : cyan);
-    blink(-1.92, y + 0.5, 2.0, [cyan, amber][k], 0.5);
+  // bunk: rangka dengan 4 tiang, dua kasur bersusun, rel pengaman dan tangga
+  {
+    const bx = -1.5, z0 = 1.85, z1 = 3.85, zc = (z0 + z1) / 2;
+    for (const px of [bx - 0.46, bx + 0.46]) for (const pz of [z0 + 0.03, z1 - 0.03]) box(0.06, 2.0, 0.06, px, 1.0, pz, metal);
+    for (let k = 0; k < 2; k++) {
+      const y = 0.38 + k * 0.95; // permukaan rangka
+      box(0.98, 0.07, 2.0, bx, y, zc, hullD);
+      box(0.9, 0.13, 1.92, bx, y + 0.1, zc, k ? L(0x9fb1c6) : L(0xc9ccd2));
+      box(0.86, 0.06, 1.0, bx, y + 0.18, z1 - 0.55, k ? fabricB : fabric);
+      box(0.5, 0.09, 0.3, bx, y + 0.2, z0 + 0.28, L(0xeeeeee));
+      box(0.04, 0.16, 1.9, bx - 0.47, y + 0.14, zc, hullD); // rel sisi dinding
+      if (k) box(0.03, 0.2, 1.2, bx + 0.47, y + 0.2, z1 - 0.65, metal); // rel pengaman sisi lorong
+      box(0.9, 0.02, 0.03, bx, y + 0.34, z0 + 0.02, k ? amber : cyan); // lampu baca
+    }
+    // tangga di ujung depan kasur
+    for (const dz of [-0.17, 0.17]) box(0.03, 1.55, 0.03, bx + 0.46, 0.8, z0 - 0.3 + dz, metal);
+    for (let i = 0; i < 5; i++) box(0.03, 0.03, 0.36, bx + 0.46, 0.25 + i * 0.3, z0 - 0.3, metal);
+    blink(bx - 0.42, 1.9, z0 + 0.05, cyan, 0.5);
   }
-  for (const z of [1.85, 3.85]) cyl(0.03, 0.03, 2.4, -1.97, 1.2, z, metal);
-  rect(-1.75, -0.98, 1.8, 3.9);
-  for (let i = 0; i < 5; i++) box(0.04, 0.03, 0.4, -1.0, 0.25 + i * 0.4, 1.7, metal).rotation.y = 1.57;
+  rect(-1.98, -0.98, 1.8, 3.9);
   // loker atas
   for (let i = 0; i < 4; i++) {
     box(0.4, 0.55, 0.5, -1.75, 2.35, 1.9 + i * 0.52, i % 2 ? hull : hullD);
@@ -328,9 +340,12 @@ export function buildShip(): ShipRig {
     rect(s > 0 ? 0.6 : -2, s > 0 ? 2 : -0.6, 3.93, 4.17);
   }
   box(1.3, 0.62, 0.14, 0, 2.4, 4.05, hull);
-  box(1.3, 0.05, 0.16, 0, 2.08, 4.05, red);
-  box(0.06, 2.1, 0.16, -0.6, 1.05, 4.05, amber);
-  box(0.06, 2.1, 0.16, 0.6, 1.05, 4.05, amber);
+  box(1.34, 0.07, 0.17, 0, 2.11, 4.05, hullD);
+  sph(0.04, 0, 2.06, 3.95, red.clone(), g, 6);
+  for (const sx of [-1, 1]) {
+    box(0.05, 2.1, 0.17, sx * 0.62, 1.05, 4.05, hullD);
+    sph(0.03, sx * 0.6, 2.0, 3.95, amber, g, 6);
+  }
   // dinding pembatas ruang mesin z=5.95 dengan jendela
   box(4.3, 0.9, 0.14, 0, 0.45, 5.95, hull);
   box(4.3, 0.55, 0.14, 0, 2.43, 5.95, hull);
@@ -402,6 +417,7 @@ export function buildShip(): ShipRig {
   box(4.2, 0.1, 0.3, 0, 1.06, -5.4, hullD);
   // sayap
   for (const s of [-1, 1]) {
+    const n0 = g.children.length;
     const w = box(4.2, 0.16, 3.2, s * 4.0, 0.7, 3.6, hull);
     w.rotation.z = s * -0.05;
     w.rotation.y = s * 0.12;
@@ -412,17 +428,22 @@ export function buildShip(): ShipRig {
     cyl(0.22, 0.22, 0.3, s * 3.0, 0.58, 6.7, dark, [Math.PI / 2, 0, 0], g, 16);
     cyl(0.12, 0.12, 0.05, s * 3.0, 0.58, 6.86, amber, [Math.PI / 2, 0, 0], g, 16);
     blink(s * 6.1, 0.82, 4.2, s < 0 ? red : green, 1.2, 0.07);
+    parts.set(s < 0 ? 'wingL' : 'wingR', g.children.slice(n0));
   }
   // sirip ekor + antena + parabola
+  const nFin = g.children.length;
   box(0.12, 1.6, 1.6, 0, 3.5, 6.0, hull);
   box(0.14, 0.3, 1.0, 0, 4.3, 6.2, accent);
   blink(0, 4.5, 6.5, white, 1.5, 0.07);
+  parts.set('fin', g.children.slice(nFin));
+  const nDish = g.children.length;
   cyl(0.02, 0.02, 1.3, 0.6, 3.4, 0.8, metal);
   const dish = new THREE.Mesh(new THREE.SphereGeometry(0.4, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.5), metal);
   dish.position.set(-0.8, 3.0, 1.5);
   dish.rotation.x = -0.8;
   g.add(dish);
   cyl(0.03, 0.03, 0.4, -0.8, 2.85, 1.5, metal);
+  parts.set('dish', g.children.slice(nDish));
   box(2.2, 0.1, 5.2, 0, 2.86, 1.2, hullD);
   for (let i = 0; i < 6; i++) box(0.5, 0.03, 0.2, -0.9 + (i % 3) * 0.9, 2.93, 0.2 + Math.floor(i / 3) * 3.4, i % 2 ? accent : metal);
   // nama kapal
@@ -452,10 +473,13 @@ export function buildShip(): ShipRig {
     g.add(lg);
     legs.push(lg);
   }
+  legs.forEach((l, i) => parts.set('leg' + i, [l]));
   // mesin utama + nyala
   const engineGlows: THREE.Mesh[] = [];
+  let engI = 0;
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x66c8ff, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
   for (const [x, y] of [[0, 1.3], [-0.9, 0.8], [0.9, 0.8]] as [number, number][]) {
+    const nEng = g.children.length;
     cyl(0.32, 0.45, 0.6, x, y, 7.4, dark, [Math.PI / 2, 0, 0], g, 16);
     cyl(0.4, 0.4, 0.04, x, y, 7.7, hullD, [Math.PI / 2, 0, 0], g, 16);
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.36, 3.0, 14, 1, true), glowMat.clone());
@@ -468,6 +492,7 @@ export function buildShip(): ShipRig {
     core.rotation.x = Math.PI / 2;
     g.add(core);
     engineGlows.push(core);
+    parts.set('engine' + engI++, g.children.slice(nEng));
   }
   // sensor, lampu depan
   for (const s of [-1, 1]) {
@@ -500,6 +525,6 @@ export function buildShip(): ShipRig {
     yoke, holo, holoPlanets, holoShip, blinkers, engineGlows, engineLight,
     hatch, hatchLamp,
     lights: { cockpit: cockpitL, cabin: cabinL, airlock: airL, hemi },
-    sun, colliders, legs, fans, reactor, exteriorOnly,
+    sun, colliders, legs, fans, reactor, exteriorOnly, parts,
   };
 }

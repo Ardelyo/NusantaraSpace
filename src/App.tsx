@@ -35,6 +35,14 @@ function TapBtn({ onTap, children, className = '', active = false }: { onTap: ()
   );
 }
 
+const fmtClock = (sec: number) => {
+  if (!isFinite(sec) || sec <= 0) return '—';
+  if (sec >= 86400) return `${(sec / 86400).toFixed(1)} hr`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return h > 0 ? `${h}j ${m}m` : `${m}:${String(s).padStart(2, '0')}`;
+};
+const nextWarp = (w: number) => ([1, 5, 25, 100, 500, 2000][([1, 5, 25, 100, 500, 2000].indexOf(w) + 1) % 6]);
+
 const Key = ({ k }: { k: string }) => <kbd className="mx-0.5 rounded border border-white/30 bg-white/10 px-1 py-px font-mono text-[10px] text-white">{k}</kbd>;
 
 export default function App() {
@@ -231,7 +239,7 @@ export default function App() {
 
   const hint = (() => {
     if (!pc) return null;
-    if (pilot) return <><Key k="W/S" /><Key k="A/D" />kemudi <Key k="Q/E" />roll <Key k="Shift/Ctrl" />atau <Key k="roda" />daya <Key k="X" />rem <Key k="B" />turbo <Key k="P" />auto <Key k="U" />sandar <Key k="T" />berdiri</>;
+    if (pilot) return <><Key k="W/S" /><Key k="A/D" />kemudi <Key k="Q/E" />roll <Key k="Shift/Ctrl" />atau <Key k="roda" />daya <Key k="X" />rem <Key k="B" />turbo <Key k="P" />auto <Key k="Y" />tahan <Key k="I" />darat <Key k="," /><Key k="." />waktu <Key k="U" />sandar</>;
     if (riding) return <><Key k="W/S" />gas <Key k="A/D" />belok <Key k="B" />turbo <Key k="mouse" />kamera <Key k="R" />turun</>;
     if (eva) return <><Key k="WASD" />jalan <Key k="Shift" />lari <Key k="Spasi" />lompat/jet <Key k="C" />turun <Key k="F" />aksi <Key k="R" />rover <Key k="K" />basecamp <Key k="G" />bendera <Key k="O" />tarik</>;
     if (walk) return <><Key k="WASD" />jalan <Key k="Shift" />lari <Key k="Spasi" />lompat <Key k="F" />aksi {inHab ? <><Key k="H" />konsol modul</> : <><Key k="T" />duduk</>}</>;
@@ -257,6 +265,16 @@ export default function App() {
           {h.glare > 0.02 && <div className="pointer-events-none absolute inset-0 z-[6]" style={{ opacity: h.glare * 0.75, background: 'radial-gradient(circle at 50% 45%, rgba(255,250,235,0.95), rgba(255,230,180,0.3) 55%, rgba(255,200,120,0) 85%)' }} />}
           {h.gasDepth > 0.01 && <div className="pointer-events-none absolute inset-0 z-[6] bg-black" style={{ opacity: Math.min(0.6, h.gasDepth * 25) }} />}
           {flash > 0 && <div className="pointer-events-none absolute inset-0 z-[7] bg-white" style={{ opacity: flash }} />}
+          {h.suitBreach > 0.05 && (
+            <svg className="pointer-events-none absolute inset-0 z-[8] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ opacity: Math.min(0.9, h.suitBreach + 0.15) }}>
+              <g stroke="rgba(235,245,255,0.85)" strokeWidth="0.25" fill="none" strokeLinecap="round">
+                <path d="M62 18 L55 30 L58 41 L50 52 M55 30 L44 33 L38 44 M58 41 L70 46 L74 57" />
+                <path d="M20 70 L27 62 L25 52 L33 44 M27 62 L38 66 L44 77" />
+                <path d="M84 14 L78 22 L80 28 M78 22 L70 20" />
+              </g>
+            </svg>
+          )}
+          {h.destroyed && <div className="pointer-events-none absolute inset-0 z-[9] bg-red-900/30" />}
           {h.lightning > 0.02 && <div className="pointer-events-none absolute inset-0 z-[7] bg-white" style={{ opacity: h.lightning * 0.85 }} />}
           {stormTint && wk > 0.02 && !inHab && <div className="pointer-events-none absolute inset-0 z-[6]" style={{ background: `radial-gradient(ellipse at 50% 60%, rgba(${stormTint},${0.1 * wk}) 20%, rgba(${stormTint},${0.38 * wk}) 100%)` }} />}
           {h.radiation > 0.04 && <div className="pointer-events-none absolute inset-0 z-[8] rad-fx" style={{ opacity: Math.min(0.85, h.radiation * (eva ? 0.9 : 0.5)) }} />}
@@ -285,37 +303,40 @@ export default function App() {
                   <div className="mt-1 text-[10px] text-white/50">g {h.gravity.toFixed(2)} m/s²</div>
                 </div>
               )}
+              {(pilot || mode === 'walk') && (
+                <div className="mt-1 w-28">
+                  {h.orbit.valid && (
+                    <div className="mb-1 text-[9.5px] leading-tight text-cyan-100/70">
+                      {h.orbit.state === 'orbit' ? `ORBIT ${h.orbit.primary}` : h.orbit.state === 'lepas' ? `LINTASAN LEPAS · ${h.orbit.primary}` : `SUBORBITAL · ${h.orbit.primary}`}<br />
+                      Pe {fmtDist(Math.max(0, h.orbit.pe - h.primaryR))}{h.orbit.state !== 'lepas' && <> · Ap {fmtDist(Math.max(0, h.orbit.ap - h.primaryR))}</>}
+                      {h.orbit.state === 'orbit' && <><br />T {fmtClock(h.orbit.T)}</>}
+                    </div>
+                  )}
+                  <div className="text-[9px] tracking-widest text-amber-200/70">BBM {Math.round(h.fuel * 100)}%</div>
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-white/15"><div className={`h-full ${h.fuel < 0.15 ? 'bg-red-400' : 'bg-amber-300'}`} style={{ width: `${h.fuel * 100}%` }} /></div>
+                  <div className="mt-1 text-[9px] tracking-widest text-emerald-200/70">LAMBUNG {Math.round(h.hull * 100)}%</div>
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-white/15"><div className={`h-full ${h.hull < 0.4 ? 'bg-red-400' : 'bg-emerald-300'}`} style={{ width: `${h.hull * 100}%` }} /></div>
+                  <div className={`mt-1 text-[9.5px] ${h.skinT > 1500 ? 'text-red-300' : 'text-white/50'}`}>kulit {Math.round(h.skinT - 273.15)}°C</div>
+                  <div className={`text-[9.5px] ${h.cabinT > 320 ? 'text-red-300' : 'text-white/50'}`}>kabin {Math.round(h.cabinT - 273.15)}°C{h.gForce > 0.5 ? ` · ${h.gForce.toFixed(1)}g` : ''}</div>
+                </div>
+              )}
+              {eva && h.jetDv < 150 && (
+                <div className="text-[9.5px] text-sky-200/60">jet Δv {Math.round(h.jetDv)} m/s</div>
+              )}
               {inHab && (
                 <div className="mt-1 w-28">
                   <div className="text-[9px] tracking-widest text-emerald-200/70">DAYA {Math.round(h.power * 100)}%</div>
                   <div className="h-1.5 w-full overflow-hidden rounded bg-white/15"><div className={`h-full ${h.power < 0.6 ? 'bg-red-400' : 'bg-emerald-300'}`} style={{ width: `${h.power * 100}%` }} /></div>
                 </div>
               )}
-              {h.mission && (
-                <div className="mt-2 w-[220px] max-w-[52vw] rounded-xl border border-emerald-300/30 bg-black/45 px-2.5 py-1.5 backdrop-blur-sm">
-                  <div className="text-[9px] tracking-widest text-emerald-300/80">MISI · {h.mission.title.toUpperCase()}</div>
-                  <div className="font-sans text-[11.5px] leading-snug text-white/90">{h.mission.text}</div>
-                  {h.mission.need > 1 && (
-                    <div className="mt-1 h-1 overflow-hidden rounded bg-white/15"><div className="h-full bg-emerald-300" style={{ width: `${Math.min(100, (h.mission.prog / h.mission.need) * 100)}%` }} /></div>
-                  )}
-                </div>
-              )}
             </div>
-            <button
-              className="pointer-events-auto mt-1 max-w-[40%] truncate rounded-full border border-amber-300/50 bg-black/40 px-3 py-1.5 text-xs text-amber-100 backdrop-blur active:scale-95"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => openPanel('map')}
-            >
-              {h.target ? `◎ ${h.target.name} · ${fmtDist(h.target.dist)}` : '◎ Pilih target'}
-              {h.autopilot && <span className="ml-1 text-emerald-300">● AP</span>}
-            </button>
             <div className="pointer-events-auto flex flex-col items-end gap-1.5">
-              <div className="flex gap-1.5">
-                <TapBtn onTap={() => openPanel('map')} className="h-10 w-10 text-lg">🗺</TapBtn>
-                <TapBtn onTap={() => openPanel('missions')} className="h-10 w-10 text-base">📋</TapBtn>
-                {h.canBuild && <TapBtn onTap={() => openPanel('build')} className="h-10 w-10 text-base">🏗</TapBtn>}
-                <TapBtn onTap={() => eng().toggleMute()} className="h-10 w-10 text-base">{h.muted ? '🔇' : '🔊'}</TapBtn>
-                <TapBtn onTap={() => openPanel('help')} className="h-10 w-10 text-base">?</TapBtn>
+              <div className="flex gap-1">
+                <TapBtn onTap={() => openPanel('map')} className="h-9 w-9 text-base">🗺</TapBtn>
+                <TapBtn onTap={() => openPanel('missions')} className="h-9 w-9 text-sm">📋</TapBtn>
+                {h.canBuild && <TapBtn onTap={() => openPanel('build')} className="h-9 w-9 text-sm">🏗</TapBtn>}
+                <TapBtn onTap={() => eng().toggleMute()} className="h-9 w-9 text-sm">{h.muted ? '🔇' : '🔊'}</TapBtn>
+                <TapBtn onTap={() => openPanel('help')} className="h-9 w-9 text-sm">?</TapBtn>
               </div>
               <div className="pointer-events-none rounded-full border border-amber-300/30 bg-black/40 px-2.5 py-0.5 font-mono text-[11px] text-amber-200 backdrop-blur-sm">
                 ◈ {h.credits}{h.samples > 0 && <span className="ml-2 text-emerald-300">⬡ {h.samples}</span>}
@@ -323,20 +344,65 @@ export default function App() {
             </div>
           </div>
 
-          {/* toast, cuaca & peringatan */}
-          <div className="pointer-events-none absolute left-0 right-0 top-[88px] z-20 flex flex-col items-center gap-1.5 px-6">
-            {h.warn && <div className="warn-pulse rounded-full border border-red-400/70 bg-red-900/60 px-4 py-1.5 font-mono text-xs text-red-100">⚠ {h.warn}</div>}
-            {w && (
-              <div className={`rounded-full border px-3.5 py-1 font-mono text-[11.5px] backdrop-blur ${w.active ? 'warn-pulse border-red-400/70 bg-red-900/55 text-red-100' : 'border-amber-300/60 bg-amber-900/40 text-amber-100'}`}>
-                {w.icon} {w.label}{w.active ? (w.k < 0.95 ? ` — ${w.k < 0.5 ? 'mendekat' : 'memuncak'}` : ' — memuncak') : ` dalam ${Math.ceil(w.in)} dtk`}
-                {w.active && <span className="ml-2 text-[10.5px]">{h.mode === 'eva' && !riding ? '⚠ di luar!' : w.sheltered ? '✔ aman' : ''}</span>}
+          {/* kolom tengah: target, misi, cuaca, toast, tips (tidak saling menimpa) */}
+          <div className="pointer-events-none absolute left-0 right-0 top-[max(50px,calc(env(safe-area-inset-top)+40px))] z-20 flex flex-col items-center gap-1.5 pl-[132px] pr-3 sm:px-6">
+            <button
+              className="pointer-events-auto max-w-full truncate rounded-full border border-amber-300/50 bg-black/45 px-3 py-1 text-xs text-amber-100 backdrop-blur active:scale-95"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => openPanel('map')}
+            >
+              {h.target ? `◎ ${h.target.name} · ${fmtDist(h.target.dist)}` : '◎ Pilih target'}
+              {h.autopilot && <span className="ml-1 text-emerald-300">● AP</span>}
+            </button>
+            {h.mission && (
+              <div className="w-full max-w-[340px] rounded-xl border border-emerald-300/30 bg-black/55 px-2.5 py-1.5 backdrop-blur-sm">
+                <div className="truncate font-mono text-[9px] tracking-widest text-emerald-300/80">MISI · {h.mission.title.toUpperCase()}</div>
+                <div className="line-clamp-3 text-[11.5px] leading-snug text-white/90">{h.mission.text}</div>
+                {h.mission.need > 1 && (
+                  <div className="mt-1 h-1 overflow-hidden rounded bg-white/15"><div className="h-full bg-emerald-300" style={{ width: `${Math.min(100, (h.mission.prog / h.mission.need) * 100)}%` }} /></div>
+                )}
               </div>
             )}
-            {h.link && pilot && <div className="rounded-full border border-emerald-300/50 bg-emerald-900/40 px-3.5 py-1 font-mono text-[11px] text-emerald-100">⚓ {h.link.docked ? 'Tersandar' : 'Dekat'}: {h.link.name}</div>}
-            {h.scanning && <div className="rounded-full border border-cyan-300/50 bg-cyan-900/40 px-3.5 py-1 font-mono text-[11px] text-cyan-100">⌖ Memindai…</div>}
+            {h.warn && <div className="warn-pulse max-w-full rounded-full border border-red-400/70 bg-red-900/60 px-3 py-1 font-mono text-xs text-red-100">⚠ {h.warn}</div>}
+            {w && (
+              <div className={`max-w-full rounded-2xl border px-3 py-1 text-center font-mono text-[11px] leading-snug backdrop-blur ${w.active ? 'warn-pulse border-red-400/70 bg-red-900/55 text-red-100' : 'border-amber-300/60 bg-amber-900/45 text-amber-100'}`}>
+                {w.icon} {w.label}{w.active ? (w.k < 0.5 ? ' — mendekat' : ' — memuncak') : ` dalam ${Math.ceil(w.in)} dtk`}
+                {w.active && <span className="ml-1.5">{h.mode === 'eva' && !riding ? '⚠ di luar!' : w.sheltered ? '✔ aman di dalam' : ''}</span>}
+              </div>
+            )}
+            {h.link && pilot && <div className="max-w-full truncate rounded-full border border-emerald-300/50 bg-emerald-900/45 px-3 py-1 font-mono text-[11px] text-emerald-100">⚓ {h.link.docked ? 'Tersandar' : 'Dekat'}: {h.link.name}</div>}
+            {h.habStat && (h.habStat.damaged > 0 || h.habStat.pressure < 0.97 || h.habStat.fire) && (
+              <div className={`max-w-full rounded-2xl border px-3 py-1 text-center font-mono text-[11px] leading-snug backdrop-blur ${h.habStat.fire || h.habStat.pressure < 0.6 ? 'warn-pulse border-red-400/70 bg-red-900/55 text-red-100' : 'border-amber-300/60 bg-amber-900/45 text-amber-100'}`}>
+                {h.habStat.fire ? '🔥 API! ' : ''}{h.habStat.leak ? '💨 BOCOR ' : ''}Tekanan {Math.round(h.habStat.pressure * 100)}% · struktur {Math.round(h.habStat.hp * 100)}% · {h.habStat.damaged} modul rusak
+              </div>
+            )}
+            {pilot && h.parts.lost.length > 0 && <div className="max-w-full rounded-2xl border border-amber-300/60 bg-amber-900/45 px-3 py-1 text-center font-mono text-[11px] leading-snug text-amber-100">🔧 Hilang: {Object.entries(h.parts.lost.reduce<Record<string, number>>((m, n) => { m[n] = (m[n] || 0) + 1; return m; }, {})).map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(', ')}</div>}
+            {h.warpNow > 1 && <div className="rounded-full border border-fuchsia-300/60 bg-fuchsia-900/45 px-3 py-1 font-mono text-[11px] text-fuchsia-100">⏩ waktu ×{h.warpNow}</div>}
+            {pilot && (h.hold || h.landAssist) && <div className="rounded-full border border-emerald-300/50 bg-emerald-900/45 px-3 py-1 font-mono text-[11px] text-emerald-100">{h.landAssist ? '⬇ pendaratan otomatis' : '✋ tahan posisi'}</div>}
+            {h.scanning && <div className="rounded-full border border-cyan-300/50 bg-cyan-900/45 px-3 py-1 font-mono text-[11px] text-cyan-100">⌖ Memindai…</div>}
             {toasts.map((t) => (
-              <div key={t.id} className={`toast-in max-w-md rounded-2xl border px-4 py-2 text-center text-sm backdrop-blur ${t.kind === 'discover' ? 'border-amber-300/60 bg-amber-500/20 text-amber-100' : t.kind === 'warn' ? 'border-red-400/50 bg-red-900/40 text-red-100' : 'border-cyan-300/30 bg-black/50 text-cyan-50'}`}>{t.text}</div>
+              <div key={t.id} className={`toast-in w-full max-w-md rounded-2xl border px-3 py-1.5 text-center text-[13px] leading-snug backdrop-blur ${t.kind === 'discover' ? 'border-amber-300/60 bg-amber-500/25 text-amber-100' : t.kind === 'warn' ? 'border-red-400/50 bg-red-900/50 text-red-100' : 'border-cyan-300/30 bg-black/60 text-cyan-50'}`}>{t.text}</div>
             ))}
+            {tip && !panel && (
+              <div className="pointer-events-auto w-full max-w-[340px] rounded-2xl border border-cyan-300/40 bg-[#050d14]/92 p-2.5 text-[11.5px] leading-snug text-cyan-50 backdrop-blur" onPointerDown={(e) => e.stopPropagation()}>
+                <div className="mb-1 font-semibold text-amber-200">Selamat datang, Kapten.</div>
+                <ul className="space-y-0.5 text-white/80">
+                  {pc ? (
+                    <>
+                      <li>🖱 Mouse kemudi · roda daya · <b>F</b> aksi · <b>Tab</b> peta · <b>J</b> misi</li>
+                      <li>🛰 Peta → <b>Stasiun Kartika</b> → <b>P</b> autopilot → <b>U</b> sandar</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>↕ Geser kiri: <b>daya</b> · ✥ kanan: <b>kemudi</b></li>
+                      <li>🗺 Pilih <b>Stasiun Kartika</b> → <b>AUTO</b> → <b>SANDAR</b></li>
+                    </>
+                  )}
+                  <li>⛺ EVA di tanah padat → <b>BASE</b>; 🏗 pasang/lepas modul</li>
+                </ul>
+                <button className="mt-1.5 text-amber-300" onClick={() => setTip(false)}>Mengerti</button>
+              </div>
+            )}
           </div>
 
           {/* urutan airlock */}
@@ -357,14 +423,14 @@ export default function App() {
               <div className="pb-1 font-mono text-[10px] leading-tight text-cyan-100/80">
                 DAYA<br /><span className="text-base text-white">{Math.round(h.throttle * 100)}%</span><br />
                 <span className="text-white/40">{pc ? 'roda mouse' : 'geser ↑↓'}</span><br />
-                <span className="text-white/40">batas {fmtSpeed(h.limit)}</span>
+                <span className="text-white/40">a maks {h.limit.toFixed(0)} m/s²</span>
               </div>
             </div>
           )}
 
           {/* tombol kanan */}
           {showCtl && (
-            <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-2.5">
+            <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] right-3 z-20 flex max-h-[calc(100dvh-190px)] flex-col flex-wrap-reverse content-end items-center gap-2">
               {pilot && (
                 <>
                   <div className="flex flex-col gap-2">
@@ -374,6 +440,13 @@ export default function App() {
                   </div>
                   {(h.canDock || h.link?.docked) && (
                     <TapBtn onTap={() => eng().dockToggle()} active={!!h.link?.docked} className="h-14 w-14 flex-col text-[10px] font-mono leading-none"><span className="text-lg">⚓</span>{h.link?.docked ? 'LEPAS' : 'SANDAR'}</TapBtn>
+                  )}
+                  {!h.link?.docked && (
+                    <>
+                      <TapBtn onTap={() => eng().toggleHold()} active={h.hold} className="h-12 w-12 flex-col text-[9px] font-mono leading-none"><span className="text-base">✋</span>TAHAN</TapBtn>
+                      <TapBtn onTap={() => eng().toggleLandAssist()} active={h.landAssist} className="h-12 w-12 flex-col text-[9px] font-mono leading-none"><span className="text-base">⬇</span>DARAT</TapBtn>
+                      <TapBtn onTap={() => eng().setWarp(nextWarp(h.warp))} active={h.warp > 1} className="h-12 w-12 flex-col text-[9px] font-mono leading-none"><span className="text-base">⏩</span>×{h.warp}</TapBtn>
+                    </>
                   )}
                   {h.target && !h.link?.docked && (
                     <TapBtn onTap={() => (h.autopilot ? eng().cancelAutopilot() : eng().engageAutopilot())} active={h.autopilot} className="h-14 w-14 flex-col text-[10px] font-mono leading-none"><span className="text-lg">⌖</span>AUTO</TapBtn>
@@ -462,29 +535,6 @@ export default function App() {
               </div>
             );
           })}
-
-          {/* tips awal */}
-          {tip && !panel && (
-            <div className="absolute right-3 top-[104px] z-30 w-[min(270px,46vw)] max-h-[44vh] overflow-y-auto rounded-2xl border border-cyan-300/40 bg-[#050d14]/90 p-3 text-[11.5px] leading-snug text-cyan-50 backdrop-blur" onPointerDown={(e) => e.stopPropagation()}>
-              <div className="mb-1 font-semibold text-amber-200">Selamat datang, Kapten.</div>
-              <ul className="space-y-0.5 text-white/80">
-                {pc ? (
-                  <>
-                    <li>🖱 Mouse = kemudi · roda = daya · <b>F</b> aksi · <b>Tab</b> peta · <b>J</b> misi</li>
-                    <li>🛰 Pilih <b>Stasiun Kartika</b> di peta → <b>P</b> autopilot → <b>U</b> sandar</li>
-                  </>
-                ) : (
-                  <>
-                    <li>↕ Geser kiri: <b>daya dorong</b> · ✥ geser kanan: <b>kemudi</b></li>
-                    <li>🗺 Pilih <b>Stasiun Kartika</b> → <b>AUTO</b> → <b>SANDAR</b></li>
-                  </>
-                )}
-                <li>🌪 Mars punya badai debu, Venus hujan asam, Bumi punya kehidupan — cek 📋 misi</li>
-                <li>⛺ EVA di permukaan padat lalu dirikan <b>Basecamp</b>; 🏗 pasang/lepas modul</li>
-              </ul>
-              <button className="mt-2 text-amber-300" onClick={() => setTip(false)}>Mengerti</button>
-            </div>
-          )}
 
           {panel === 'map' && eng() && (
             <MapPanel

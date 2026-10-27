@@ -13,10 +13,11 @@ export interface BodyDef {
   radius: number;
   parent: string | null;
   dist: number;
-  speed: number; // kecepatan orbit (unit/detik)
+  speed: number; // (tidak dipakai lagi) kecepatan orbit sekarang dihitung dari Kepler: ω = √(μ/a³)
   phase: number;
   incl: number;
-  spin: number; // rad/detik
+  spin: number; // rad/detik (diturunkan dari rotasi nyata, lihat REAL_SPIN)
+  locked?: boolean; // terkunci pasang-surut: spin = ω orbit
   tilt: number;
   g: number; // m/s2 permukaan
   style: Style;
@@ -176,6 +177,22 @@ export function makeSolarSystem(): BodyDef[] {
     info: { radiusKm: '1.188 km', gravity: '0,62 m/s²', temp: '-230 °C', atm: 'N₂ sangat tipis', desc: 'Dunia es di tepi Sabuk Kuiper dengan dataran nitrogen berbentuk hati dan pegunungan es air.' },
   });
 
+  // Rotasi nyata (rad/s) & radius nyata (m). Dengan g nyata dan radius diperkecil, rasio
+  // percepatan sentrifugal/gravitasi dipertahankan bila spin = ω_nyata · √(R_nyata / R_game).
+  const REAL: Record<string, [number, number, boolean?]> = {
+    matahari: [2.86e-6, 696340e3], merkurius: [1.24e-6, 2440e3], venus: [2.99e-7, 6052e3], bumi: [7.292e-5, 6371e3],
+    mars: [7.088e-5, 3390e3], ceres: [1.923e-4, 470e3], jupiter: [1.76e-4, 71492e3], saturnus: [1.637e-4, 60268e3],
+    uranus: [1.012e-4, 25559e3], neptunus: [1.083e-4, 24764e3],
+    bulan: [0, 1737e3, true], phobos: [0, 11.1e3, true], deimos: [0, 6.2e3, true], io: [0, 1821e3, true], europa: [0, 1561e3, true],
+    ganymede: [0, 2634e3, true], callisto: [0, 2410e3, true], enceladus: [0, 252e3, true], titan: [0, 2575e3, true],
+    triton: [0, 1353e3, true], pluto: [1.139e-5, 1188e3],
+  };
+  for (const b of B) {
+    const r = REAL[b.id];
+    if (!r) continue;
+    if (r[2]) b.locked = true;
+    else b.spin = r[0] * Math.sqrt(r[1] / b.radius);
+  }
   return B;
 }
 
@@ -215,7 +232,7 @@ export function generateWorld(seed: number, index: number, pos: [number, number,
   const atmHue = (hue + 0.55) % 1;
   return {
     id: `gen${index}`, name, kind: 'Dunia Generatif', radius, parent: null, dist: 0, speed: 0, phase: 0, incl: 0,
-    spin: 0.002 + r() * 0.005, tilt: r() * 0.7, g: 3 + r() * 10, style: 'alien', seed: Math.floor(r() * 9000) + 200,
+    spin: 2e-4 + r() * 7e-4, tilt: r() * 0.7, g: 3 + r() * 10, style: 'alien', seed: Math.floor(r() * 9000) + 200,
     t: T(1800 + r() * 2500, 1.2 + r() * 1.2, 0.9, 0.5 + r() * 0.6, 1, r() < 0.3 ? 0.4 : 0, sea),
     atm: hasAtm
       ? { color: hsl(atmHue, 0.9, 0.58), fog: hsl(atmHue, 0.5, 0.7), h: 1000 + r() * 1500, dens: 1 / (14000 + r() * 30000) }

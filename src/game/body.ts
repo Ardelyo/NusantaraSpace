@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { Noise3, craters, clamp, smooth, lerp } from './noise';
 import type { BodyDef, RGB } from './bodies';
+import { ATMOSPHERES, generatedAtmosphere, muOf, orbitalOmega, soiRadius, type AtmosphereData } from './physics';
 
 const N = 20; // kuad per patch
 const KTAB = [6, 5, 3.6, 2.6, 2.0, 1.6]; // jarak pemisahan (dalam ukuran patch) per level
@@ -111,6 +112,14 @@ export class Body {
   private tv3 = new THREE.Vector3();
   frameNo = 0;
   atmThickness = 0;
+  // --- fisika (lihat physics.ts)
+  mu = 0; // parameter gravitasi g·R²
+  soi = Infinity; // jari-jari bola pengaruh
+  vel = new THREE.Vector3(); // kecepatan inersia (analitik)
+  omegaVec = new THREE.Vector3(); // vektor kecepatan sudut spin (dunia)
+  parentBody: Body | null = null;
+  private lockedSet = false;
+  phys: AtmosphereData | null = null; // atmosfer fisik (ρ₀, H, T)
 
   constructor(def: BodyDef, scene: THREE.Scene) {
     this.def = def;
@@ -118,6 +127,10 @@ export class Body {
     this.R = def.radius;
     this.noise = new Noise3(def.seed);
     this.noiseOff = (def.seed % 97) * 3.17;
+    this.mu = muOf(def.g, def.radius);
+    this.omegaVec.set(-Math.sin(def.tilt), Math.cos(def.tilt), 0).multiplyScalar(def.spin);
+    this.phys = ATMOSPHERES[def.id] ?? (def.atm && def.fixedPos ? generatedAtmosphere(def.seed) : null);
+    if (def.fixedPos) this.soi = def.radius * 25;
     this.root.add(this.spinG);
     scene.add(this.root);
     if (def.style === 'sun') this.buildSun();
@@ -132,16 +145,19 @@ export class Body {
   orbit(t: number, byId: Map<string, Body>) {
     this.prevPos.copy(this.pos);
     const d = this.def;
-    if (d.fixedPos) this.pos.set(d.fixedPos[0], d.fixedPos[1], d.fixedPos[2]);
-    else if (!d.parent) this.pos.set(0, 0, 0);
+    if (d.fixedPos) { this.pos.set(d.fixedPos[0], d.fixedPos[1], d.fixedPos[2]); this.vel.set(0, 0, 0); }
+    else if (!d.parent) { this.pos.set(0, 0, 0); this.vel.set(0, 0, 0); }
     else {
-      const p = byId.get(d.parent)!;
-      const a = d.phase + (d.speed / d.dist) * t;
-      this.pos.set(
-        p.pos.x + Math.cos(a) * d.dist,
-        p.pos.y + Math.sin(a) * Math.sin(d.incl) * d.dist,
-        p.pos.z + Math.sin(a) * d.dist * Math.cos(d.incl)
-      );
+      const p = this.parentBody ?? (this.parentBody = byId.get(d.parent)!);
+      // Kepler: ω = √(μ_induk / a³), orbit lingkaran berinklinasi
+      const w = orbitalOmega(p.mu, d.dist);
+      if (this.soi === Infinity) this.soi = Math.max(soiRadius(d.dist, this.mu, p.mu), this.R * 3);
+      if (d.locked && !this.lockedSet) { this.lockedSet = true; d.spin = w; this.omegaVec.set(-Math.sin(d.tilt), Math.cos(d.tilt), 0).multiplyScalar(w); }
+      const a = d.phase + w * t;
+      const ca = Math.cos(a), sa = Math.sin(a), si = Math.sin(d.incl), ci = Math.cos(d.incl);
+      this.pos.set(p.pos.x + ca * d.dist, p.pos.y + sa * si * d.dist, p.pos.z + sa * d.dist * ci);
+      const sp = w * d.dist;
+      this.vel.set(p.vel.x - sa * sp, p.vel.y + ca * si * sp, p.vel.z + ca * ci * sp);
     }
     this.prevQuat.copy(this.quat);
     this.tq.setFromAxisAngle(this.tv.set(0, 1, 0), d.spin * t + d.phase);
@@ -151,6 +167,11 @@ export class Body {
   syncRender(origin: THREE.Vector3) {
     this.root.position.set(this.pos.x - origin.x, this.pos.y - origin.y, this.pos.z - origin.z);
     this.spinG.quaternion.copy(this.quat);
+  }
+
+  /** kecepatan titik yang menempel pada permukaan (relatif pusat benda): Ω × r */
+  surfaceVel(rel: THREE.Vector3, out: THREE.Vector3) {
+    return out.copy(this.omegaVec).cross(rel);
   }
 
   // dari vektor relatif-dunia (sumbu dunia) ke lokal-spin
