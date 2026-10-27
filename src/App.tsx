@@ -265,6 +265,15 @@ export default function App() {
           {h.glare > 0.02 && <div className="pointer-events-none absolute inset-0 z-[6]" style={{ opacity: h.glare * 0.75, background: 'radial-gradient(circle at 50% 45%, rgba(255,250,235,0.95), rgba(255,230,180,0.3) 55%, rgba(255,200,120,0) 85%)' }} />}
           {h.gasDepth > 0.01 && <div className="pointer-events-none absolute inset-0 z-[6] bg-black" style={{ opacity: Math.min(0.6, h.gasDepth * 25) }} />}
           {flash > 0 && <div className="pointer-events-none absolute inset-0 z-[7] bg-white" style={{ opacity: flash }} />}
+          {h.suitBreach > 0.05 && (
+            <svg className="pointer-events-none absolute inset-0 z-[8] h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ opacity: Math.min(0.9, h.suitBreach + 0.15) }}>
+              <g stroke="rgba(235,245,255,0.85)" strokeWidth="0.25" fill="none" strokeLinecap="round">
+                <path d="M62 18 L55 30 L58 41 L50 52 M55 30 L44 33 L38 44 M58 41 L70 46 L74 57" />
+                <path d="M20 70 L27 62 L25 52 L33 44 M27 62 L38 66 L44 77" />
+                <path d="M84 14 L78 22 L80 28 M78 22 L70 20" />
+              </g>
+            </svg>
+          )}
           {h.destroyed && <div className="pointer-events-none absolute inset-0 z-[9] bg-red-900/30" />}
           {h.lightning > 0.02 && <div className="pointer-events-none absolute inset-0 z-[7] bg-white" style={{ opacity: h.lightning * 0.85 }} />}
           {stormTint && wk > 0.02 && !inHab && <div className="pointer-events-none absolute inset-0 z-[6]" style={{ background: `radial-gradient(ellipse at 50% 60%, rgba(${stormTint},${0.1 * wk}) 20%, rgba(${stormTint},${0.38 * wk}) 100%)` }} />}

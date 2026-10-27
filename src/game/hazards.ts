@@ -217,7 +217,7 @@ export class WeatherFX {
   banks: Cloud; // gumpalan debu/abu raksasa
   grains: Cloud; // butiran pasir yang melompat-lompat di dekat tanah
   bolt: THREE.LineSegments;
-  private boltPos = new Float32Array(2 * 160 * 3);
+  private boltPos = new Float32Array(2 * 800 * 3);
   private boltAbs: number[] = [];
   private boltT = 0;
   n = 1100;
@@ -304,7 +304,9 @@ export class WeatherFX {
       }
     };
     split(from.clone(), to.clone(), from.distanceTo(to) * 0.22, 6);
-    for (const [a, b] of segs.slice(0, 160)) out.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    // beberapa salinan bergeser tipis agar petir tampak tebal (garis WebGL selalu 1 px)
+    const offs: [number, number, number][] = [[0, 0, 0], [0.14, 0, 0], [0, 0, 0.14], [-0.12, 0.04, -0.12], [0.07, 0, -0.1]];
+    for (const [ox, oy, oz] of offs) for (const [a, b] of segs.slice(0, 160)) out.push(a.x + ox, a.y + oy, a.z + oz, b.x + ox, b.y + oy, b.z + oz);
     this.boltAbs = out;
     this.boltT = 0.28;
   }
@@ -312,6 +314,7 @@ export class WeatherFX {
   // origin: titik pusat render (dunia), up: arah "atas" lokal, camPos: posisi kamera di dunia (absolut)
   update(dt: number, origin: THREE.Vector3, up: THREE.Vector3, type: HazardType | null, k: number, camPos: THREE.Vector3, density: number, cx: WeatherCtx = { light: 1, groundDist: 5, targets: [], gust: 1 }) {
     this.time += dt;
+    if (type === 'ash') density = Math.max(density, 0.7); // pluma vulkanik balistik: terlihat meski tanpa udara
     const mat = this.mat;
     const info = type ? HAZARDS[type] : null;
     const show = info && k > 0.02 && density > 0.02 && (info.wind > 0 || info.fall > 0 || type === 'quake');
@@ -319,7 +322,7 @@ export class WeatherFX {
     if (this.boltT > 0) {
       this.boltT -= dt;
       const bp = this.boltPos, ba = this.boltAbs;
-      const nv = Math.min(Math.floor(ba.length / 3), 320);
+      const nv = Math.min(Math.floor(ba.length / 3), 1600);
       for (let i = 0; i < nv; i++) { bp[i * 3] = ba[i * 3] - origin.x; bp[i * 3 + 1] = ba[i * 3 + 1] - origin.y; bp[i * 3 + 2] = ba[i * 3 + 2] - origin.z; }
       this.bolt.geometry.setDrawRange(0, nv);
       (this.bolt.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;

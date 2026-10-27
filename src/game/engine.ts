@@ -88,6 +88,7 @@ export interface Hud {
   parts: { lost: string[]; total: number };
   windQ: number;
   destroyed: boolean;
+  suitBreach: number;
 }
 
 export interface TargetInfo {
@@ -110,6 +111,8 @@ export interface TargetInfo {
   gSurf?: number; // gravitasi permukaan (m/s²)
   escV?: number; // kecepatan lepas dari permukaan (m/s)
   circV?: number; // kecepatan orbit rendah (m/s)
+  tSurf?: number; // suhu permukaan (K)
+  pSurf?: number; // tekanan permukaan (Pa)
 }
 
 export interface Events {
@@ -1456,6 +1459,7 @@ export class Engine {
     const out: Partial<TargetInfo> = { gSurf: b.def.g, escV: PH.escapeSpeed(b.mu, b.R), circV: PH.circularSpeed(b.mu, b.R) };
     if (b.def.parent) { const p = this.byId.get(b.def.parent); if (p) out.period = PH.orbitalPeriod(p.mu, b.def.dist); }
     if (isFinite(b.soi)) out.soi = b.soi;
+    if (b.phys && (!b.def.fixedPos || this.scannedBodies.has(b.id))) { out.tSurf = b.phys.T0; out.pSurf = PH.atmPressure(b.phys, b.def.g, 0); }
     return out;
   }
 
@@ -1632,7 +1636,17 @@ export class Engine {
     const eva = this.mode === 'eva';
     if (!eva) this.jetDv = Math.min(150, this.jetDv + dt * 30);
     if (eva && !this.rv.riding) {
-      this.oxygen = Math.max(0, this.oxygen - dt / 420);
+      // sobekan baju (integritas < 50%) membocorkan oksigen: gas menyembur dari baju
+      const leak = clamp((0.5 - this.suit) * 2);
+      this.oxygen = Math.max(0, this.oxygen - (dt / 420) * (1 + leak * 6));
+      if (leak > 0.05 && Math.random() < dt * (10 + 30 * leak)) {
+        const fx = this.debris.fx;
+        const A = this.astro;
+        fx.withFrame(() => ({ p: this.astroFrame.p, att: this.astroFrame.att }), this.astroFrame.att, () => {
+          const up = this.v1.copy(A.pos).sub((this.astroFrame.p ?? this.findPrimary(A.pos)).pos).normalize();
+          fx.gas.spawn({ x: A.pos.x + up.x * 0.9, y: A.pos.y + up.y * 0.9, z: A.pos.z + up.z * 0.9, vx: A.vel.x + (Math.random() - 0.5) * 2.5, vy: A.vel.y + (Math.random() - 0.5) * 2.5, vz: A.vel.z + (Math.random() - 0.5) * 2.5, life: 0.7, s0: 0.06, s1: 0.5 + leak * 0.5, c0: [0.95, 0.97, 1, 0.5], c1: [0.95, 0.97, 1, 0], drag: 1.4 });
+        });
+      }
       if (this.oxygen < 0.2 && Math.floor(this.time * 2) % 8 === 0 && !this.warn) this.setWarn('Oksigen rendah', 3);
       if (this.oxygen <= 0 && !this.autoReturn) { this.autoReturn = true; this.toast('Oksigen habis! Penarikan darurat ke kapal', 'warn'); this.audio.warn(); }
     } else {
@@ -1934,6 +1948,7 @@ export class Engine {
 
     // ---- kerusakan habitat tiap bingkai (api, bocor, abu, korosi)
     this.habAlarm = 0; this.habFire = 0; this.ventK = 0;
+    if (eva && !this.rv.riding) this.ventK = clamp((0.5 - this.suit) * 1.2);
     const pin = this.mode === 'hab' ? this.inHab : null;
     for (const h of [...this.habs]) {
       const rhoH = h.kind === 'base' && h.body && h.body.phys ? PH.atmDensity(h.body.phys, 0) : 0;
@@ -3383,7 +3398,7 @@ export class Engine {
       solar: this.fl.solar, jetDv: this.jetDv, primaryR: (this.shipFrame.p ?? this.sun).R,
       habStat: this.inHab ? { name: this.inHab.name, hp: this.inHab.worstHp, pressure: this.inHab.pressure, fire: this.inHab.onFire, leak: this.inHab.totalLeak > 0, modules: this.inHab.mods.size, damaged: this.inHab.damagedKeys().length } : null,
       parts: { lost: [...this.shipDmg.lost].map((i) => this.shipDmg.partLabel(i)), total: this.rig.parts.size },
-      windQ: this.windQ, destroyed: this.destroyed,
+      windQ: this.windQ, destroyed: this.destroyed, suitBreach: this.mode === 'eva' && !this.rv.riding ? clamp((0.5 - this.suit) * 2) : 0,
     };
   }
 

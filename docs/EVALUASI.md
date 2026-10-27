@@ -108,7 +108,7 @@ Ringkasan: game ini memakai skala dan model yang bersifat **kinematik dan artist
 6. **Skala konsisten (F1, F4, F5)**: tentukan satu faktor skala untuk jarak dan radius, lalu turunkan periode dan spin darinya. Pilih faktor yang juga menjaga Bulan dan Bumi dalam perbandingan yang wajar.
 7. **Gravitasi dari massa dan radius (F6, F9)**: `g = GM/R²` dengan `M` ditetapkan per benda, dan gravitasi di EVA memakai `1/r²`.
 8. **Heat dan drag (Fl4, Fl5)**: pakai `q = ½ρv²` dan pemanasan `√ρ·v³` jika ingin sesuai teori. Tidak wajib untuk game, tetapi harus disebut sebagai pendekatan.
-9. **Biologi (B1–B3)**: mensyaratkan air cair (sea) dan suhu hidup di kisaran 0–100 °C dari jarak Matahari, dan cek air atau lereng saat menentukan jalur hewan.
+9. **Biologi (B1–B5)** ✔ terimplementasi: mensyaratkan air cair (sea) dan suhu hidup di kisaran 0–100 °C dari jarak Matahari, dan cek air atau lereng saat menentukan jalur hewan.
 10. **Semburan surya (Fl7)**: buat intensitas tiap benda bergantung pada magnetosfer (Bumi dan Jupiter kuat, Venus dan Mars lemah).
 
 Catatan: sebagian besar temuan adalah **pendekatan artistik yang disengaja**. Yang perlu diperbaiki adalah bagian yang **menyatakan angka nyata di UI** (F1–F2, L1), karena itu yang paling mudah dilihat dan paling cepat menurunkan kepercayaan pemain.

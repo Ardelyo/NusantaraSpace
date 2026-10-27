@@ -273,10 +273,10 @@ export class DamageSystem {
           alarm = Math.max(alarm, d.fire);
           // api & asap interior
           const fi = h.ensureFxInt();
-          const n = d.fire * dt * 38;
+          const n = d.fire * dt * 60;
           for (let i = 0; i < n || (i === 0 && Math.random() < n); i++) {
-            fi.flame(center.x + rnd(-1.8, 1.8), rnd(0.1, 1.3), center.z + rnd(-1.8, 1.8), Y, 0.55 + d.fire * 0.8);
-            if (Math.random() < 0.55) fi.smokePuff(center.x + rnd(-1.5, 1.5), rnd(1.6, 2.6), center.z + rnd(-1.5, 1.5), Y, 1.1, 5);
+            fi.flame(center.x + rnd(-1.8, 1.8), rnd(0.1, 1.0), center.z + rnd(-1.8, 1.8), Y, 0.9 + d.fire * 1.2);
+            if (Math.random() < 0.7) fi.smokePuff(center.x + rnd(-1.5, 1.5), rnd(1.4, 2.6), center.z + rnd(-1.5, 1.5), Y, 1.6, 6);
           }
           // lidah api di luar lewat lubang / atap
           const ex = h.ensureFx();
@@ -326,7 +326,7 @@ export class DamageSystem {
       void cap;
     }
     // tekanan
-    if (leak > 0) h.pressure = Math.max(0, h.pressure * Math.exp(-leak * 0.06 * dt));
+    if (leak > 0) h.pressure = Math.max(0, h.pressure * Math.exp(-leak * 0.035 * dt));
     else h.pressure = Math.min(1, h.pressure + (h.powerRatio > 0.3 ? 0.06 : 0.01) * dt);
     h.alarm = Math.max(anyFire ? 0.8 : 0, leak > 0 && h.pressure < 0.9 ? 1 : 0, alarm);
     void fx; void rho;

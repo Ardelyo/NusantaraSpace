@@ -84,6 +84,8 @@ export default function MapPanel({
                       <span>Atmosfer: {t.info.atm}</span>
                       {t.circV !== undefined && <span>Orbit rendah: {fmtSpeed(t.circV)}</span>}
                       {t.escV !== undefined && <span>Kec. lepas: {fmtSpeed(t.escV)}</span>}
+                      {t.tSurf !== undefined && <span>Suhu permukaan: {Math.round(t.tSurf - 273.15)} °C</span>}
+                      {t.pSurf !== undefined && <span>Tekanan: {t.pSurf >= 1000 ? (t.pSurf / 1000).toFixed(t.pSurf > 1e5 ? 0 : 1) + ' kPa' : Math.round(t.pSurf) + ' Pa'}</span>}
                       {t.period !== undefined && <span>Periode orbit: {fmtClock(t.period)}</span>}
                       {t.soi !== undefined && <span>Bola pengaruh: {fmtDist(t.soi)}</span>}
                       {t.life && <span className="col-span-2">Kehidupan: <b className={t.life === 'Tidak ada' ? 'text-white/60' : 'text-emerald-300'}>{t.life}</b></span>}

@@ -360,7 +360,7 @@ export class GameAudio {
   // ---------- efek ----------
   tone(freq: number, dur: number, type: OscillatorType = 'sine', vol = 0.12, slide = 0, delay = 0) {
     const ctx = this.ctx;
-    if (!ctx) return;
+    if (!ctx || !(vol > 0.0015)) return; // volume ~0 membuat rampa eksponensial melempar galat
     const t = ctx.currentTime + delay;
     const o = ctx.createOscillator();
     const g = ctx.createGain();
@@ -379,7 +379,7 @@ export class GameAudio {
 
   burst(dur: number, f0: number, f1: number, vol = 0.2, type: BiquadFilterType = 'bandpass', delay = 0) {
     const ctx = this.ctx;
-    if (!ctx) return;
+    if (!ctx || !(vol > 0.0015)) return;
     const t = ctx.currentTime + delay;
     const s = ctx.createBufferSource();
     s.buffer = this.noise;

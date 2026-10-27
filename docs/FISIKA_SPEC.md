@@ -223,3 +223,15 @@ Langkah 1–3 mengubah inti simulasi dan harus diuji ulang secara menyeluruh. La
 | Stasiun pada orbit Kepler, orientasi LVLH | Selesai | — |
 | Kecepatan jatuh hujan (asam 7, badai 9, metana 3 m/s) | Selesai | — |
 | Densitas Mars ρ₀ | 0,0155 kg/m³ (tekanan 610 Pa); angka 0,02 pada draf awal sudah diganti | — |
+
+## Status implementasi (bencana, kerusakan, biologi)
+
+| Butir | Status | Keterangan |
+|---|---|---|
+| Hujan asam Venus hanya di dek awan 45–70 km | Selesai | `HAZARDS.acid.alt`; `HazardSystem.allowed()`; bencana mereda 5× lebih cepat bila keluar rentang |
+| Gaya angin dari kerapatan udara | Selesai | q = ½ρw²; astronot (CdA 1 m², 150 kg vs gesekan 0,6 g), panel/antena patah bila q melampaui kekuatan, drag kapal memakai kecepatan udara relatif angin |
+| Kerusakan meteor pada modul | Selesai | `onMeteorImpact` → `DamageSystem.hitModule` (langsung ≤3 m, serpihan ≤55 m), kawah hangus, lontaran batu |
+| Istirahat / lompat waktu | Selesai | `Engine.skipTime` — ¼ hari setempat; bencana & kebocoran tetap berjalan |
+| Aturan biologi | Selesai | air cair + 273–373 K + >611 Pa; kelembapan/suhu/lereng; gerombol; hewan hindari air; bank burung dari gaya sentripetal |
+| Kerusakan visual fisik | Selesai | penyok/lubang, bagian lepas jadi puing, api, asap, kebocoran, ledakan, retak kaca kokpit, sobek baju membocorkan oksigen |
+| Suara bencana | Selesai | angin, siulan, desis pasir + ketukan butiran, hujan, gemuruh, guntur tertunda jarak/343, api berderak, alarm, desis bocor, ledakan, benturan logam |

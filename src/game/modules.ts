@@ -700,6 +700,8 @@ const dentMats = {
 };
 export function dentMesh(d: Dent): THREE.Group {
   const g = new THREE.Group();
+  // acak deterministik dari posisi agar bentuk tak berubah saat dirangkai ulang
+  const rr = (k: number) => { const v = Math.sin(d.p[0] * 12.9898 + d.p[1] * 78.233 + d.p[2] * 37.719 + k * 4.1) * 43758.5453; return v - Math.floor(v); };
   g.position.set(d.p[0], d.p[1], d.p[2]);
   g.quaternion.setFromUnitVectors(DENT_Y, new THREE.Vector3(d.n[0], d.n[1], d.n[2]));
   const scorch = new THREE.Mesh(new THREE.CircleGeometry(d.r * (2.0 + d.burn * 1.6), 22), dentMats.scorch);
@@ -710,7 +712,7 @@ export function dentMesh(d: Dent): THREE.Group {
   fun.rotation.x = Math.PI; fun.position.y = -depth / 2 + 0.02;
   g.add(fun);
   const rim = new THREE.Mesh(new THREE.TorusGeometry(d.r * 1.02, d.r * 0.14, 6, 16), dentMats.rim);
-  rim.rotation.x = Math.PI / 2; rim.position.y = 0.025; rim.scale.set(1, 1, 1.3 + Math.random() * 0.5);
+  rim.rotation.x = Math.PI / 2; rim.position.y = 0.025; rim.scale.set(1, 1, 1.3 + rr(1) * 0.5);
   g.add(rim);
   if (d.hole) {
     const hole = new THREE.Mesh(new THREE.CircleGeometry(d.r * 0.82, 14), dentMats.hole);
@@ -722,7 +724,7 @@ export function dentMesh(d: Dent): THREE.Group {
   }
   // pecahan runcing di tepi
   for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2 + Math.random();
+    const a = (i / 5) * Math.PI * 2 + rr(2 + i);
     const sp = new THREE.Mesh(new THREE.ConeGeometry(d.r * 0.12, d.r * 0.7, 4), dentMats.rim);
     sp.position.set(Math.cos(a) * d.r * 1.05, d.r * 0.2, Math.sin(a) * d.r * 1.05);
     sp.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9);
