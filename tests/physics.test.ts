@@ -136,4 +136,29 @@ t('Termal kabin: Venus panas, Bumi nyaman', () => {
   n += 2;
 });
 
+t('Angin: tekanan dinamis bergantung kerapatan udara', () => {
+  const qMars = P.dynamicPressure(0.0155, 25);
+  const qEarth = P.dynamicPressure(1.225, 40);
+  near(qMars, 4.84, 0.01, 'badai debu Mars 25 m/s ≈ 4,8 Pa');
+  near(qEarth, 980, 0.01, 'badai Bumi 40 m/s ≈ 0,98 kPa');
+  assert.ok(qEarth / qMars > 150, 'angin Bumi ratusan kali lebih menekan daripada Mars');
+  // gaya pada astronot (CdA 1 m², 150 kg) vs gesekan statis 0,6 g
+  const aEarth = qEarth / 150, aMars = qMars / 150;
+  assert.ok(aEarth > 0.6 * 9.81 * 0.9, `Bumi menyeret astronot: ${aEarth}`);
+  assert.ok(aMars < 0.05, `Mars tak mendorong: ${aMars}`);
+  n += 4;
+});
+
+t('Dek awan Venus: kondisi hidup & asam', () => {
+  const v = P.ATMOSPHERES.venus;
+  const alt = 55e3;
+  const T = P.atmTemperature(v, alt);
+  const rho = P.atmDensity(v, alt);
+  assert.ok(rho > 1 && rho < 4, `ρ pada 55 km ≈ 2 kg/m³: ${rho}`);
+  assert.ok(T > 250 && T < 480, `T pada 55 km: ${T}`);
+  // permukaan jauh lebih panas & lebih rapat daripada dek awan
+  assert.ok(P.atmDensity(v, 0) > 20 * rho, 'permukaan jauh lebih rapat');
+  n += 3;
+});
+
 console.log(`\n${n} pernyataan lulus`);

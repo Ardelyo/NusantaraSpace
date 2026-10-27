@@ -7,7 +7,9 @@ import { GameAudio } from './audio';
 import { drawRadar, drawNav, drawStatus, drawMap, type ScreenData, type Blip } from './screens';
 import { makeStarfield, makeStation, makeVoyager, makeFlag, AsteroidBelt, Dust, makeFlares } from './extras';
 import { clamp, smooth } from './noise';
-import { Habitat, BASE_KIT, STATION_LAYOUT, MOD_DEFS, CELL, DOCK_GAP, type ModType, type HabSave, type PlacedMod, type AttachSlot } from './modules';
+import { Habitat, BASE_KIT, STATION_LAYOUT, MOD_DEFS, MOD_STRENGTH, CELL, DOCK_GAP, type ModType, type HabSave, type PlacedMod, type AttachSlot } from './modules';
+import { DebrisField, FxLights, FxSet, type DebrisEnv, type Frame } from './effects';
+import { DamageSystem, ShipDamage, launchDebris, type DmgCtx, type FrameInfo } from './damage';
 import { HazardSystem, WeatherFX, HAZARDS, hazardsOf, lifeOf, type HazardType, type LifeProfile } from './hazards';
 import { LifeField } from './life';
 import { MissionLog } from './missions';
@@ -81,6 +83,11 @@ export interface Hud {
   solar: number;
   jetDv: number;
   primaryR: number;
+  // kerusakan
+  habStat: { name: string; hp: number; pressure: number; fire: boolean; leak: boolean; modules: number; damaged: number } | null;
+  parts: { lost: string[]; total: number };
+  windQ: number;
+  destroyed: boolean;
 }
 
 export interface TargetInfo {
@@ -118,7 +125,8 @@ export interface BuildState {
   id: string; name: string; kind: 'station' | 'base';
   power: { gen: number; use: number; ratio: number; solar: number };
   credits: number;
-  mods: { key: string; ix: number; iz: number; type: ModType; rot: number; core: boolean; ports: boolean[]; open: boolean[] }[];
+  mods: { key: string; ix: number; iz: number; type: ModType; rot: number; core: boolean; ports: boolean[]; open: boolean[]; hp: number; fire: number; lost: number; dents: number; repair: number; dust: number; ash: number }[];
+  pressure: number;
   slots: AttachSlot[];
   here: string | null;
 }
@@ -227,6 +235,26 @@ export class Engine {
   habLight = new THREE.PointLight(0xfff0dd, 0, 0, 1);
   hazards = new HazardSystem();
   fx!: WeatherFX;
+  debris!: DebrisField;
+  fxLights!: FxLights;
+  dmg!: DamageSystem;
+  shipDmg!: ShipDamage;
+  shipFx!: FxSet;
+  thunderQ: { t: number; power: number; vol: number }[] = [];
+  windNow = new THREE.Vector3();
+  windQ = 0;
+  gustPh = Math.random() * 100;
+  quakeT = 0;
+  deathT = 0;
+  deathWhy = '';
+  craters: THREE.Mesh[] = [];
+  habAlarm = 0;
+  habFire = 0;
+  ventK = 0;
+  sandK = 0;
+  rainK = 0;
+  private tmpL = new THREE.Vector3();
+  private hazFog = new THREE.FogExp2(0x000000, 0);
   life!: LifeField;
   lifeProfiles = new Map<string, LifeProfile | null>();
   missions = new MissionLog();
@@ -283,6 +311,7 @@ export class Engine {
   private v2 = new THREE.Vector3();
   private v3 = new THREE.Vector3();
   private v4 = new THREE.Vector3();
+  private v5 = new THREE.Vector3();
   private m4 = new THREE.Matrix4();
   private camQ = new THREE.Quaternion();
   private camP = new THREE.Vector3();
@@ -359,8 +388,10 @@ export class Engine {
     }
     for (const b of this.bodies) this.registerBody(b);
     this.fx = new WeatherFX(this.world);
-    this.fx.onImpact = (d) => this.onMeteorImpact(d);
+    this.fx.onImpact = (d, pt, up) => this.onMeteorImpact(d, pt, up);
     this.life = new LifeField(this.world);
+    this.debris = new DebrisField(this.world);
+    this.fxLights = new FxLights(this.world, 2);
     this.rv.rig = makeRover();
     this.rv.rig.group.visible = false;
     this.world.add(this.rv.rig.group);
@@ -369,6 +400,10 @@ export class Engine {
     p(0.76, 'Merakit kapal Nusantara-7');
     this.rig = buildShip();
     this.shipScene.add(this.rig.group, this.rig.sun, this.habHemi, this.habLight);
+    this.shipFx = new FxSet(this.rig.group, false, 220);
+    const dctx = this.makeDmgCtx();
+    this.dmg = new DamageSystem(dctx);
+    this.shipDmg = new ShipDamage(this.rig, dctx, this.shipFx);
     this.habLight.position.set(0, 2.4, 0);
     await tick();
 
@@ -647,6 +682,8 @@ export class Engine {
     else if (pr.action === 'mount') this.mountRover();
     else if (pr.action === 'dismount') this.dismountRover();
     else if (pr.action === 'scan-fauna' || pr.action === 'scan-flora') this.scanLife(pr.action === 'scan-fauna' ? 'fauna' : 'flora');
+    else if (pr.action === 'extinguish') { const pm = this.playerModuleKey(); if (pm) { this.dmg.extinguish(pm.h, pm.key, 0.55); this.shake = Math.max(this.shake, 0.01); } }
+    else if (pr.action === 'repair-ext') { const nd = this.nearDamaged(); if (nd) { const err = this.repairModule(nd.key, nd.h); if (err) this.toast(err, 'warn'); } }
     else if (pr.action === 'dock') this.dockToggle();
     else if (pr.action === 'undock') this.undock();
     else if (pr.action.startsWith('h:')) this.habAction(pr.action.slice(2));
@@ -730,8 +767,9 @@ export class Engine {
     const gen = b.def.fixedPos ? b.def.seed : undefined;
     const hasAtm = !!b.def.atm;
     const hasSea = !!b.def.t && b.def.t.sea !== null;
-    this.hazards.setProfile(b.id, hazardsOf(b.id, gen, hasAtm, hasSea));
-    this.lifeProfiles.set(b.id, lifeOf(b.id, gen, hasAtm, hasSea));
+    const senv = b.phys ? { T0: b.phys.T0, pSurf: PH.atmPressure(b.phys, b.def.g, 0) } : undefined;
+    this.hazards.setProfile(b.id, hazardsOf(b.id, gen, hasAtm, hasSea, senv));
+    this.lifeProfiles.set(b.id, lifeOf(b.id, gen, hasAtm, hasSea, senv));
     this.siteLeft.set(b.id, 14);
   }
 
@@ -795,7 +833,7 @@ export class Engine {
       for (const hs of (o.habs || []) as HabSave[]) {
         if (hs.kind === 'station') {
           const h = this.habs.find((x) => x.id === hs.id);
-          if (h && hs.mods?.some(valid)) { h.mods.clear(); for (const m of hs.mods) if (valid(m)) h.place(m.type, m.ix, m.iz, m.rot | 0); h.rebuild(); }
+          if (h && hs.mods?.some(valid)) { h.mods.clear(); for (const m of hs.mods) if (valid(m)) h.place(m.type, m.ix, m.iz, m.rot | 0); this.restoreDmg(h, hs); h.rebuild(); }
         } else {
           const b = hs.bodyId ? this.byId.get(hs.bodyId) : undefined;
           if (!b || !hs.dir || !b.isTerrain) continue;
@@ -804,11 +842,73 @@ export class Engine {
           h.dirL.set(hs.dir[0], hs.dir[1], hs.dir[2]).normalize();
           h.yaw = hs.yaw || 0;
           for (const m of hs.mods) if (valid(m)) h.place(m.type, m.ix, m.iz, m.rot | 0);
+          this.restoreDmg(h, hs);
           h.rebuild();
           this.addHab(h);
         }
       }
     } catch { /* abaikan data rusak */ }
+  }
+
+  private restoreDmg(h: Habitat, hs: HabSave) {
+    h.dmg.clear();
+    for (const d of hs.dmg || []) if (h.mods.has(d.key)) h.dmg.set(d.key, { hp: Math.max(0.02, Math.min(1, d.hp)), fire: 0, dents: Array.isArray(d.dents) ? d.dents : [], lost: Array.isArray(d.lost) ? d.lost : [], dust: 0, ash: 0 });
+  }
+
+  // ------------------------------------------------ perbaikan & pemadaman
+  repairModule(key: string, hab?: Habitat): string | null {
+    const h = hab ?? this.currentHab();
+    if (!h) return 'Tidak ada habitat';
+    const m = h.mods.get(key);
+    if (!m) return 'Modul tidak ada';
+    const cost = this.dmg.repairCost(h, key);
+    if (cost <= 0) return 'Modul dalam kondisi baik';
+    if (this.credits < cost) return `Kredit kurang (butuh ${cost})`;
+    this.credits -= cost;
+    h.repairModule(key);
+    h.computePower();
+    this.audio.wrench(1);
+    this.toast(`${MOD_DEFS[m.type].name} diperbaiki (−${cost} kr)`, 'discover');
+    this.save();
+    return null;
+  }
+
+  repairAllModules(): string | null {
+    const h = this.currentHab();
+    if (!h) return 'Tidak ada habitat';
+    let total = 0;
+    for (const k of h.damagedKeys()) total += this.dmg.repairCost(h, k);
+    if (total <= 0) return 'Semua modul dalam kondisi baik';
+    if (this.credits < total) return `Kredit kurang (butuh ${total})`;
+    this.credits -= total;
+    for (const k of h.damagedKeys()) h.repairModule(k);
+    h.computePower();
+    this.audio.wrench(1);
+    this.toast(`Semua modul diperbaiki (−${total} kr)`, 'discover');
+    this.save();
+    return null;
+  }
+
+  private playerModuleKey(): { h: Habitat; key: string } | null {
+    if (this.mode !== 'hab' || !this.inHab) return null;
+    const m = this.inHab.getMod(Math.round(this.walkPos.x / CELL), Math.round(this.walkPos.z / CELL));
+    return m ? { h: this.inHab, key: m.key } : null;
+  }
+
+  /** modul rusak terdekat yang dapat dijangkau dari luar (EVA) */
+  private nearDamaged(): { h: Habitat; key: string; cost: number } | null {
+    let best: { h: Habitat; key: string; cost: number; d: number } | null = null;
+    for (const h of this.habs) {
+      if (h.pos.distanceTo(this.astro.pos) > 40) continue;
+      for (const k of h.damagedKeys()) {
+        const m = h.mods.get(k)!;
+        const d = this.astro.pos.distanceTo(this.dmg.habToWorld(h, this.dmg.modCenter(h, m)));
+        const dd = h.getDmg(k);
+        const needs = dd.hp < 0.995 || dd.dents.length || dd.lost.length || dd.dust > 0.05 || dd.ash > 5;
+        if (needs && d < 9 && (!best || d < best.d)) best = { h, key: k, cost: this.dmg.repairCost(h, k), d };
+      }
+    }
+    return best ? { h: best.h, key: best.key, cost: best.cost } : null;
   }
 
   currentHab(): Habitat | null {
@@ -827,7 +927,8 @@ export class Engine {
       id: h.id, name: h.name, kind: h.kind,
       power: { gen: h.powerGen, use: h.powerUse, ratio: h.powerRatio, solar: h.solarFactor },
       credits: this.credits,
-      mods: [...h.mods.values()].map((m) => ({ key: m.key, ix: m.ix, iz: m.iz, type: m.type, rot: m.rot, core: m.key === core, ports: h.worldPorts(m), open: h.openWorld(m) })),
+      mods: [...h.mods.values()].map((m) => { const d = h.dmg.get(m.key); return { key: m.key, ix: m.ix, iz: m.iz, type: m.type, rot: m.rot, core: m.key === core, ports: h.worldPorts(m), open: h.openWorld(m), hp: d ? d.hp : 1, fire: d ? d.fire : 0, lost: d ? d.lost.length : 0, dents: d ? d.dents.length : 0, repair: this.dmg.repairCost(h, m.key), dust: d ? d.dust : 0, ash: d ? d.ash : 0 }; }),
+      pressure: h.pressure,
       slots: h.slots(),
       here: this.inHab ? `${Math.round(this.walkPos.x / CELL)},${Math.round(this.walkPos.z / CELL)}` : null,
     };
@@ -1056,9 +1157,22 @@ export class Engine {
         if (this.linkHab === h) this.enterShipFromHab();
         else this.toast('Tidak ada kapal yang bersandar di sini', 'warn');
         break;
-      case 'rest':
-        this.transition('Beristirahat…', () => { this.suit = 1; this.oxygen = 1; this.toast('Segar kembali — baju & oksigen penuh', 'info'); this.emit('rest', {}); });
+      case 'rest': {
+        if (!(this.docked || (this.landed && this.contact))) { this.toast('Kapal masih melayang — sandarkan/daratkan dulu agar aman untuk tidur', 'warn'); break; }
+        if (h.onFire || h.pressure < 0.6) { this.toast('Tidak bisa tidur: ada api atau tekanan habitat turun!', 'warn'); break; }
+        // lama tidur: ¼ hari setempat (stasiun: 90 menit), 10 menit – 6 jam
+        const b = h.kind === 'base' ? h.body : null;
+        const day = b && b.def.spin > 1e-7 ? (2 * Math.PI) / b.def.spin : 5400 * 4;
+        const dur = clamp(day / 4, 600, 21600);
+        this.transition('Beristirahat…', () => {
+          const done = this.skipTime(dur);
+          this.suit = 1; this.oxygen = 1;
+          const hrs = done / 3600;
+          this.toast(`Tidur ${hrs >= 1 ? hrs.toFixed(1) + ' jam' : Math.round(done / 60) + ' menit'} — baju & oksigen penuh${done < dur ? ' (dibangunkan alarm)' : ''}`, 'info');
+          this.emit('rest', {});
+        });
         break;
+      }
       case 'lab':
         if (this.samplesHeld > 0) {
           const n = this.samplesHeld, gain = n * 45;
@@ -1072,8 +1186,16 @@ export class Engine {
         break;
       case 'harvest': {
         const last = this.harvestAt.get(h.id) ?? -999;
-        if (this.time - last > 60) { this.harvestAt.set(h.id, this.time); this.credits += 20; this.oxygen = 1; this.audio.discover(); this.toast('Panen segar · +20 kredit · udara disegarkan', 'discover'); this.emit('harvest', {}); }
-        else this.toast('Tanaman belum siap dipanen', 'info');
+        const gd = h.dmg.get(it.mod.key);
+        if (h.pressure < 0.5) { this.toast('Rumah kaca bocor — tanaman layu tanpa tekanan udara. Tambal & perbaiki dulu', 'warn'); break; }
+        if (gd && gd.lost.includes('glass')) { this.toast('Kubah kaca pecah — tanaman membeku/terpapar vakum. Perbaiki dulu', 'warn'); break; }
+        if (h.powerRatio < 0.5) { this.toast('Lampu tumbuh padam karena daya rendah — tanaman tak berfotosintesis', 'warn'); break; }
+        if (this.time - last > 60) {
+          // fotosintesis: cahaya (Matahari + lampu tumbuh) × daya
+          const light = clamp(h.sunFactor, 0.3, 1);
+          const gain = Math.max(4, Math.round(20 * (0.4 + 0.6 * light) * h.powerRatio));
+          this.harvestAt.set(h.id, this.time); this.credits += gain; this.oxygen = 1; this.audio.discover(); this.toast(`Panen segar · +${gain} kredit · udara disegarkan`, 'discover'); this.emit('harvest', {});
+        } else this.toast('Tanaman belum siap dipanen', 'info');
         break;
       }
       case 'power':
@@ -1091,6 +1213,35 @@ export class Engine {
     }
   }
   pendingRover = false;
+
+  /** Lompat waktu aman (kapal sandar/mendarat): dunia, bencana, kebakaran, kebocoran terus berjalan */
+  skipTime(seconds: number): number {
+    const dtS = 15;
+    let done = 0;
+    const hb = this.hazardBody();
+    while (done < seconds) {
+      this.advanceWorld(dtS, true);
+      if (this.docked) this.updateLink(0);
+      else if (this.landed) this.carry(this.shipPos, this.shipVel, this.shipFrame, this.shipQuat, true);
+      this.computeEnv(this.shipPos, this.env);
+      this.stepHazards(dtS);
+      // hujan meteor selama tidur: tumbukan acak di sekitar habitat
+      const a = this.hazards.active;
+      if (a && a.type === 'meteor' && hb && a.k > 0.2) {
+        for (const h of this.habs) {
+          if (h.kind !== 'base' || h.body !== hb || Math.random() > dtS * a.k * 0.012) continue;
+          const up = h.pos.clone().sub(hb.pos).normalize();
+          const t1 = new THREE.Vector3().copy(up).cross(new THREE.Vector3(0.3, 0.9, 0.2)).normalize();
+          this.onMeteorImpact(20, h.pos.clone().addScaledVector(t1, (Math.random() - 0.5) * 40), up);
+        }
+      }
+      done += dtS;
+      if (this.destroyed) break;
+      if (this.inHab && (this.inHab.alarm > 0.5 || this.inHab.pressure < 0.6)) break;
+    }
+    this.debris.clear();
+    return done;
+  }
 
   // ------------------------------------------------ basecamp
   deployBase() {
@@ -1484,7 +1635,15 @@ export class Engine {
       this.oxygen = Math.max(0, this.oxygen - dt / 420);
       if (this.oxygen < 0.2 && Math.floor(this.time * 2) % 8 === 0 && !this.warn) this.setWarn('Oksigen rendah', 3);
       if (this.oxygen <= 0 && !this.autoReturn) { this.autoReturn = true; this.toast('Oksigen habis! Penarikan darurat ke kapal', 'warn'); this.audio.warn(); }
-    } else this.oxygen = Math.min(1, this.oxygen + dt * (eva ? 0.1 : 0.15));
+    } else {
+      // di dalam habitat: pemulihan udara 0,08/dtk + 0,07/dtk bila rumah kaca berdaya & kubahnya utuh
+      let rate = eva ? 0.1 : 0.15;
+      if (this.inHab && this.mode === 'hab') {
+        const gh = this.inHab.modulesOf('greenhouse').some((m) => !this.inHab!.getDmg(m.key).lost.includes('glass'));
+        rate = 0.08 + (gh && this.inHab.powerRatio > 0.5 ? 0.07 : 0);
+      }
+      this.oxygen = Math.min(1, this.oxygen + dt * rate);
+    }
     if (!eva || this.rv.riding) this.suit = Math.min(1, this.suit + dt * (eva ? 0.01 : 0.05));
     if (eva && this.suit <= 0 && !this.autoReturn) {
       this.rv.riding = false;
@@ -1522,6 +1681,13 @@ export class Engine {
       jet: this.mode === 'eva' && !this.rv.riding && (this.input.jetUp || this.input.jetDown || this.input.moveY !== 0 && !this.astro.grounded) ? 1 : 0,
       walking: ((this.mode === 'walk' || this.mode === 'hab') && hasMove && this.jumpY < 0.02) || (this.mode === 'eva' && !this.rv.riding && this.astro.grounded && hasMove),
       heat: this.heat, windSpeed: clamp(Math.max(speed / 1500, this.hazards.active ? HAZARDS[this.hazards.active.type].wind * this.hazards.active.k / 30 : 0)),
+      sand: this.sandK * clamp(this.envCam.rho / 0.06 + 0.1),
+      howl: clamp(this.windQ / 150),
+      rain: this.rainK * clamp(this.envCam.rho / 0.3),
+      rumble: Math.max(this.quakeK, this.hazards.active?.type === 'ash' ? this.hazards.active.k * 0.45 : 0),
+      fire: Math.max(this.habFire, this.shipDmg.burning > 0.7 && this.mode !== 'eva' ? 0.6 : 0),
+      alarm: Math.max(this.habAlarm, this.mode === 'pilot' && this.hull < 0.3 && !this.destroyed ? 1 : 0),
+      vent: this.ventK,
     }, dt);
     this.prevSpeed = speed;
   }
@@ -1568,6 +1734,67 @@ export class Engine {
     }
   }
 
+  // ------------------------------------------------ kerusakan: konteks, bingkai, puing
+  private makeDmgCtx(): DmgCtx {
+    return {
+      debris: this.debris, lights: this.fxLights, audio: this.audio, origin: this.origin,
+      toast: (m, k) => this.toast(m, k ?? 'warn'),
+      shake: (v) => { this.shake = Math.max(this.shake, v); },
+      frameOfHab: (h) => this.frameOfHab(h),
+      frameOfShip: () => ({ p: this.shipFrame.p ?? this.findPrimary(this.shipPos), att: this.shipFrame.att, vel: this.shipVel.clone() }),
+      shipPose: () => ({ pos: this.shipPos, quat: this.shipQuat }),
+      upAt: (pos) => { const P = this.findPrimary(pos); return pos.clone().sub(P.pos).normalize(); },
+      listener: () => (this.mode === 'eva' ? this.astro.pos : this.shipPos),
+      playerIn: () => {
+        if (this.mode !== 'hab' || !this.inHab) return null;
+        const m = this.inHab.getMod(Math.round(this.walkPos.x / CELL), Math.round(this.walkPos.z / CELL));
+        return { h: this.inHab, key: m ? m.key : null };
+      },
+      killPlayer: (why) => this.respawn(why),
+      changed: () => { this.saveT = Math.max(this.saveT, 15); },
+    };
+  }
+
+  private frameOfHab(h: Habitat): FrameInfo {
+    if (h.kind === 'station') { const P = this.findPrimary(h.pos); return { p: P, att: false, vel: h.vel.clone().sub(P.vel) }; }
+    return { p: h.body, att: true, vel: new THREE.Vector3() };
+  }
+
+  private rhoAt(pos: THREE.Vector3): number {
+    let best = 0;
+    for (const b of this.bodies) {
+      if (!b.phys) continue;
+      const alt = pos.distanceTo(b.pos) - b.R;
+      if (alt > b.phys.H * 14) continue;
+      best = Math.max(best, PH.atmDensity(b.phys, alt));
+    }
+    return best;
+  }
+
+  private debrisEnv: DebrisEnv = {
+    carry: (pos, vel, fr, att) => this.carry(pos, vel, fr, null, att),
+    gravity: (pos, fr, out) => {
+      const P = fr.p ?? this.findPrimary(pos);
+      out.copy(pos).sub(P.pos);
+      const d = Math.max(out.length(), 1);
+      return out.multiplyScalar(-P.mu / (d * d * d));
+    },
+    ground: (pos, fr, n) => {
+      const P = fr.p;
+      if (!P || !P.isTerrain) return null;
+      n.copy(pos).sub(P.pos);
+      const d = n.length();
+      if (d > P.R + P.def.t!.amp * 3 + 400) return null;
+      n.multiplyScalar(1 / d);
+      return d - P.surfaceRadius(P.toLocal(this.tmpL.copy(n), this.tmpL));
+    },
+    rho: (pos) => this.rhoAt(pos),
+    onGround: (it, sp) => {
+      const d = it.pos.distanceTo(this.mode === 'eva' ? this.astro.pos : this.shipPos);
+      if (sp > 5 && d < 300) this.audio.impact(Math.min(1, sp / 30) * 0.5, Math.max(0, 1 - d / 300));
+    },
+  };
+
   // ------------------------------------------------ cuaca & bencana
   private windVec(up: THREE.Vector3, out = new THREE.Vector3()) {
     return out.set(0.8, 0.1, 0.6).cross(up).normalize();
@@ -1577,13 +1804,28 @@ export class Engine {
     const e = this.mode === 'eva' ? this.envCam : this.env;
     const b = e.nearest;
     if (!b || !b.isTerrain) return null;
-    return e.alt < Math.max(b.atmThickness * 1.2, 20000) ? b : null;
+    return e.alt < Math.max(b.atmThickness * 1.2, 20000, this.hazards.maxAlt(b.id)) ? b : null;
+  }
+
+  private gustAt(t: number) {
+    return clamp(1 + 0.32 * Math.sin(t * 0.9 + this.gustPh) + 0.2 * Math.sin(t * 2.3 + 1.7 * this.gustPh) + 0.12 * Math.sin(t * 5.1), 0.45, 1.7);
+  }
+
+  /** skala radiasi semburan surya: fluks Matahari, magnetosfer, dan atmosfer */
+  private radiationScale(hb: Body | null): number {
+    const o = this.mode === 'eva' ? this.astro.pos : this.shipPos;
+    let k = clamp(PH.solarFlux(this.v5.copy(o).sub(this.sun.pos).length()) / PH.S_EARTH, 0.05, 4);
+    const MAG = ['bumi', 'jupiter', 'saturnus', 'uranus', 'neptunus', 'ganymede'];
+    for (const id of MAG) { const b = this.byId.get(id); if (b && o.distanceTo(b.pos) < b.R * 7) { k *= 0.3; break; } }
+    if (hb && (this.mode === 'eva' ? this.envCam : this.env).rho > 0.05) k *= 0.15;
+    return k;
   }
 
   private forecastKey = '';
   private stepHazards(dt: number) {
     const hb = this.hazardBody();
-    this.hazards.update(dt, hb ? hb.id : null);
+    const eCur = this.mode === 'eva' ? this.envCam : this.env;
+    this.hazards.update(dt, hb ? hb.id : null, eCur.alt, eCur.rho);
     const a = this.hazards.active, fl = this.hazards.flare;
     if (a && !a.warned) {
       a.warned = true;
@@ -1604,7 +1846,7 @@ export class Engine {
       if (key !== this.forecastKey) { this.forecastKey = key; this.audio.warn(); }
     }
     this.quakeK = a && a.type === 'quake' ? a.k : 0;
-    this.radiation = fl ? fl.k : 0;
+    this.radiation = fl ? fl.k * clamp(this.radiationScale(hb), 0, 1.5) : 0;
     const eva = this.mode === 'eva';
     this.sheltered = !eva;
     const exposure = eva ? (this.rv.riding ? 0.35 : 1) : 0;
@@ -1612,62 +1854,242 @@ export class Engine {
     for (const hz of [a, fl]) {
       if (!hz || hz.k < 0.02) continue;
       const info = HAZARDS[hz.type];
-      if (eva && info.suit > 0) this.suit = Math.max(0, this.suit - info.suit * hz.k * exposure * dt);
+      const k = hz === fl ? this.radiation : hz.k;
+      if (eva && info.suit > 0) this.suit = Math.max(0, this.suit - info.suit * k * exposure * dt);
       if (!eva && hz.k > 0.3) this.emit('shelter-tick', { type: hz.type, body: hz.bodyId, hab: !!this.inHab, dt });
     }
     if (!eva && hb && this.env.alt < 8000) this.emit('low-flight', { body: hb.id, alt: this.env.alt, dt });
-    // angin
-    if (a && a.k > 0.02 && HAZARDS[a.type].wind > 0 && hb) {
+
+    // ---- angin: gaya = ½ρ·Cd·A·w²  (berarti hanya bila udara cukup rapat)
+    this.windNow.set(0, 0, 0);
+    this.windQ = 0;
+    this.sandK = 0; this.rainK = 0;
+    const upP = hb ? this.v1.copy(eva ? A.pos : this.shipPos).sub(hb.pos).normalize() : this.v1.set(0, 1, 0);
+    if (a && a.k > 0.02 && hb) {
       const info = HAZARDS[a.type];
-      const up = this.v1.copy(eva ? A.pos : this.shipPos).sub(hb.pos).normalize();
-      const w = this.windVec(up).multiplyScalar(info.wind * a.k);
-      if (eva && !this.rv.riding) {
-        if (A.grounded) A.pos.addScaledVector(w, dt * 0.1);
-        else A.vel.addScaledVector(w, dt * 0.06);
-      } else if (!eva && !this.docked && !this.landed && this.envCam.dens > 0.1) {
-        this.shipVel.addScaledVector(w, dt * 0.05 * clamp(this.env.dens));
-        this.shake = Math.max(this.shake, 0.012 * a.k * clamp(this.env.dens));
+      if (info.wind > 0) {
+        const wdir = this.windVec(upP, new THREE.Vector3());
+        const w = info.wind * a.k * this.gustAt(this.time);
+        const rho = eCur.rho;
+        const q = PH.dynamicPressure(rho, w);
+        this.windQ = q;
+        this.windNow.copy(wdir).multiplyScalar(w);
+        if (eva && !this.rv.riding) {
+          const aW = (q * 1.0) / 150; // CdA ≈ 1 m², massa kru+baju 150 kg
+          const mu = 0.6 * this.envCam.g;
+          if (!A.grounded) A.vel.addScaledVector(wdir, aW * dt);
+          else if (aW > mu) { A.pos.addScaledVector(wdir, (aW - mu) * dt * 3); if (Math.random() < dt * 0.5) this.setWarn('Angin menyeret Anda!', 1.5); }
+        }
+        // beban pada habitat: panel surya & antena patah bila q melebihi kekuatan
+        if (q > 250) for (const h of this.habs) if (h.kind === 'base' && h.body === hb) this.dmg.windLoad(h, q, wdir, dt);
+        if (this.mode !== 'eva') this.shake = Math.max(this.shake, 0.004 * clamp(q / 300) + 0.002 * a.k);
       }
-      if (this.mode !== 'eva') this.shake = Math.max(this.shake, 0.004 * a.k);
-    }
-    // petir
-    if (a && (a.type === 'storm' || a.type === 'acid') && a.k > 0.3 && Math.random() < dt * 0.5 * a.k) {
-      this.lightning = 1;
-      this.thunderAt = this.time + 0.3 + Math.random() * 1.8;
-      if (eva && !this.rv.riding && A.grounded && Math.random() < 0.1) {
-        this.suit = Math.max(0, this.suit - 0.18);
-        A.vel.add(new THREE.Vector3((Math.random() - 0.5) * 8, 4, (Math.random() - 0.5) * 8));
-        this.toast('⚡ Tersambar petir! Baju rusak', 'warn');
-        this.audio.warn();
-        this.thunderAt = this.time + 0.05;
-        this.shake = 0.12;
+      if (a.type === 'dust' || a.type === 'ash') this.sandK = a.k;
+      if (a.type === 'storm' || a.type === 'acid' || a.type === 'methane') this.rainK = a.k;
+      // efek ke habitat di permukaan benda ini
+      for (const h of this.habs) {
+        if (h.kind !== 'base' || h.body !== hb) continue;
+        for (const [key, m] of [...h.mods]) {
+          if (a.type === 'dust' && m.type === 'power') { const d = h.getDmg(key); d.dust = Math.min(1, d.dust + 0.011 * a.k * dt); }
+          else if (a.type === 'ash') { const d = h.getDmg(key); d.ash += 3 * a.k * dt; }
+          else if (a.type === 'acid') {
+            const d = h.getDmg(key);
+            d.hp = Math.max(0, d.hp - 0.0006 * a.k * dt);
+            if (d.hp <= 0 && h.coreKey() !== key) this.dmg.destroyModule(h, key, 'korosi asam');
+          }
+        }
       }
     }
+    // korosi asam pada lambung saat terbang di dek awan Venus
+    if (a && a.type === 'acid' && !eva && !this.docked && this.env.rho > 0.5 && a.k > 0.1) this.damageHull(0.0009 * a.k * dt * (this.env.rho > 0 ? 1 : 0), 'korosi asam', true);
+
+    // ---- petir
+    if (a && (a.type === 'storm' || a.type === 'acid') && a.k > 0.3 && Math.random() < dt * 0.5 * a.k) this.lightningStrike(hb!, upP.clone());
     this.lightning = Math.max(0, this.lightning - dt * 6);
-    if (this.thunderAt > 0 && this.time >= this.thunderAt) { this.thunderAt = -1; this.audio.thunk(); this.audio.hiss(1.4); }
+    for (let i = this.thunderQ.length - 1; i >= 0; i--) {
+      const q = this.thunderQ[i];
+      if (this.time >= q.t) { this.audio.thunder(q.power, q.vol); this.thunderQ.splice(i, 1); }
+    }
+
+    // ---- gempa: getaran, debu jatuh, kerusakan struktur
     if (this.quakeK > 0.02) {
       this.shake = Math.max(this.shake, 0.045 * this.quakeK * (0.6 + 0.4 * Math.sin(this.time * 23)));
       if (eva && A.grounded && !this.rv.riding) A.pos.addScaledVector(this.v2.set(Math.sin(this.time * 31), 0, Math.cos(this.time * 27)), dt * 0.4 * this.quakeK);
-      if (Math.floor(this.time * 3) % 7 === 0) this.audio.touch();
+      this.quakeT -= dt;
+      if (this.quakeT <= 0 && hb) {
+        this.quakeT = 1.1 + Math.random() * 1.6;
+        if (Math.random() < 0.55) this.audio.creak(0.8);
+        for (const h of this.habs) {
+          if (h.kind !== 'base' || h.body !== hb || !h.mods.size) continue;
+          const keys = [...h.mods.keys()];
+          const key = keys[Math.floor(Math.random() * keys.length)];
+          const m = h.mods.get(key)!;
+          const fi = h.ensureFxInt();
+          const c = this.dmg.modCenter(h, m);
+          for (let i = 0; i < 6; i++) fi.smokePuff(c.x + (Math.random() - 0.5) * 4, 2.7, c.z + (Math.random() - 0.5) * 4, new THREE.Vector3(0, -0.5, 0), 0.9, 2.5);
+          if (Math.random() < 0.7 * this.quakeK) this.dmg.hitModule(h, key, MOD_STRENGTH[m.type] * (0.0015 + 0.016 * this.quakeK * this.quakeK * Math.random()), upP.clone(), 'gempa', { quiet: true });
+        }
+      }
     }
+
+    // ---- kerusakan habitat tiap bingkai (api, bocor, abu, korosi)
+    this.habAlarm = 0; this.habFire = 0; this.ventK = 0;
+    const pin = this.mode === 'hab' ? this.inHab : null;
+    for (const h of [...this.habs]) {
+      const rhoH = h.kind === 'base' && h.body && h.body.phys ? PH.atmDensity(h.body.phys, 0) : 0;
+      this.dmg.tickHab(h, dt, h.kind === 'base' && h.body?.id === 'bumi', rhoH);
+      if (pin === h) {
+        this.habAlarm = Math.max(this.habAlarm, h.alarm);
+        if (h.onFire) this.habFire = 1;
+        if (h.totalLeak > 0 && h.pressure > 0.08) this.ventK = Math.min(1, h.totalLeak * 2) * h.pressure;
+      } else if (this.mode === 'eva' && h.pos.distanceTo(A.pos) < 40 && h.onFire) this.habFire = Math.max(this.habFire, 0.5);
+    }
+    // tekanan turun di dalam habitat: oksigen menipis
+    if (pin && pin.pressure < 0.6) {
+      this.oxygen = Math.max(0, this.oxygen - (0.6 - pin.pressure) * 0.04 * dt);
+      if (Math.floor(this.time * 2) % 6 === 0 && !this.warn) this.setWarn(`Tekanan habitat ${Math.round(pin.pressure * 100)}% — tambal kebocoran!`, 2);
+      if (this.oxygen <= 0) this.respawn('kekurangan udara akibat dekompresi');
+    }
+
     // daya habitat
     for (const h of this.habs) {
       let mul = 1;
       if (a && hb && (h.kind === 'station' ? false : h.body === hb)) mul *= 1 - HAZARDS[a.type].solar * a.k;
-      if (fl) mul *= 1 - 0.4 * fl.k;
+      if (fl) mul *= 1 - 0.4 * fl.k * clamp(this.radiationScale(hb), 0, 1);
       h.computePower(h.sunFactor * mul);
     }
   }
 
-  private onMeteorImpact(dist: number) {
+  /** sambaran petir: sasaran dipilih menurut ketinggian/keruncingan; tiang antena melindungi habitat */
+  private lightningStrike(hb: Body, up: THREE.Vector3) {
+    const eva = this.mode === 'eva';
+    const ref = eva ? this.astro.pos : this.shipPos;
+    type Cand = { pos: THREE.Vector3; w: number; kind: 'hab' | 'ship' | 'player' | 'ground'; h?: Habitat };
+    const c: Cand[] = [];
+    for (const h of this.habs) {
+      if (h.kind !== 'base' || h.body !== hb || h.pos.distanceTo(ref) > 700) continue;
+      const rod = h.modulesOf('comms').some((m) => h.partsLeft(m.key) > 0 && !h.getDmg(m.key).lost.includes('mast'));
+      c.push({ pos: h.pos.clone().addScaledVector(up, rod ? 8 : 4), w: rod ? 7 : 3, kind: 'hab', h });
+    }
+    if (this.landed && this.contact) c.push({ pos: this.shipPos.clone().addScaledVector(up, 4), w: 2.5, kind: 'ship' });
+    if (eva && this.astro.grounded && !this.rv.riding) c.push({ pos: this.astro.pos.clone(), w: 1.0, kind: 'player' });
+    const gp = ref.clone().addScaledVector(this.windVec(up, new THREE.Vector3()), (Math.random() - 0.5) * 500).addScaledVector(new THREE.Vector3().copy(up).cross(this.windVec(up, new THREE.Vector3())), (Math.random() - 0.5) * 500);
+    c.push({ pos: gp, w: 6, kind: 'ground' });
+    let tot = 0; for (const x of c) tot += x.w;
+    let r = Math.random() * tot, pick = c[c.length - 1];
+    for (const x of c) { r -= x.w; if (r <= 0) { pick = x; break; } }
+    const target = pick.pos.clone();
+    const from = target.clone().addScaledVector(up, 1500).add(new THREE.Vector3((Math.random() - 0.5) * 400, 0, (Math.random() - 0.5) * 400));
+    this.fx.strike(from, target);
+    const dist = target.distanceTo(ref);
+    this.lightning = Math.max(this.lightning, clamp(1 - dist / 1800) * 1.0 + 0.1);
+    this.fxLights.flash(target.clone().sub(this.origin).addScaledVector(up, 12), 0xcfe0ff, 5000, 0.3, 900);
+    this.thunderQ.push({ t: this.time + Math.min(9, dist / 343), power: clamp(1.2 - dist / 2500, 0.2, 1.2), vol: clamp(1.1 - dist / 3500, 0.15, 1) });
+    // sambaran dekat: letupan tajam
+    if (dist < 80) { this.shake = Math.max(this.shake, 0.18); this.audio.zap(1); }
+    if (pick.kind === 'hab' && pick.h) {
+      const h = pick.h;
+      const rodM = h.modulesOf('comms').find((m) => !h.getDmg(m.key).lost.includes('mast'));
+      if (rodM) {
+        this.toast('⚡ Tiang antena menyalurkan petir ke tanah — habitat selamat', 'info');
+        const d = h.getDmg(rodM.key);
+        if (Math.random() < 0.18) this.dmg.hitModule(h, rodM.key, MOD_STRENGTH.comms * 0.05, up, 'sambaran petir', { quiet: true });
+        void d;
+      } else {
+        const keys = [...h.mods.keys()];
+        const key = keys[Math.floor(Math.random() * keys.length)];
+        this.dmg.hitModule(h, key, MOD_STRENGTH[h.mods.get(key)!.type] * (0.2 + Math.random() * 0.25), up, 'sambaran petir', { fire: 0.35 });
+        h.ensureFx().sparkBurst(0, 4, 0, 40, 14);
+      }
+    } else if (pick.kind === 'ship') {
+      this.damageHull(0.05 + Math.random() * 0.05, 'sambaran petir', false, up);
+    } else if (pick.kind === 'player') {
+      this.suit = Math.max(0, this.suit - 0.18);
+      this.astro.vel.add(new THREE.Vector3((Math.random() - 0.5) * 8, 4, (Math.random() - 0.5) * 8));
+      this.toast('⚡ Tersambar petir! Baju rusak', 'warn');
+      this.audio.warn();
+      this.shake = 0.12;
+    } else this.groundFx(target, up, 0.6, 0x3a3630);
+  }
+
+  /** debu, percikan, & lontaran batu dari tumbukan di tanah */
+  private groundFx(p: THREE.Vector3, up: THREE.Vector3, size: number, rock = 0x6a625a) {
+    const P = this.findPrimary(p);
+    const mk = () => ({ p: P, att: true } as Frame);
+    const fx = this.debris.fx;
+    const t1 = new THREE.Vector3().copy(up).cross(new THREE.Vector3(0.3, 0.9, 0.2)).normalize();
+    const t2 = new THREE.Vector3().copy(up).cross(t1).normalize();
+    fx.withFrame(mk, true, () => {
+      for (let i = 0; i < Math.floor(10 + size * 14); i++) {
+        const a = Math.random() * 6.28, sp = (2 + Math.random() * 9) * (0.4 + size);
+        fx.smoke.spawn({ x: p.x, y: p.y, z: p.z, vx: (t1.x * Math.cos(a) + t2.x * Math.sin(a)) * sp + up.x * sp * 0.7, vy: (t1.y * Math.cos(a) + t2.y * Math.sin(a)) * sp + up.y * sp * 0.7, vz: (t1.z * Math.cos(a) + t2.z * Math.sin(a)) * sp + up.z * sp * 0.7, life: 2.5 + Math.random() * 3.5, s0: 1.2 * (0.5 + size), s1: 6 * (0.5 + size), c0: [0.5, 0.43, 0.35, 0.55], c1: [0.55, 0.5, 0.45, 0], drag: 0.8 });
+      }
+      fx.sparkBurst(p.x, p.y, p.z, Math.floor(10 + size * 30), 8 + size * 20, new THREE.Vector3().copy(up).multiplyScalar(-3));
+    });
+    // lontaran batu
+    const fi: FrameInfo = { p: P, att: true, vel: new THREE.Vector3() };
+    for (let i = 0; i < Math.floor(3 + size * 8); i++) {
+      const g = new THREE.Mesh(new THREE.DodecahedronGeometry(0.1 + Math.random() * 0.3, 0), new THREE.MeshStandardMaterial({ color: rock, roughness: 1 }));
+      g.userData.ownGeo = true;
+      const a = Math.random() * 6.28, sp = 6 + Math.random() * 24 * (0.4 + size);
+      const kick = new THREE.Vector3().copy(t1).multiplyScalar(Math.cos(a) * sp).addScaledVector(t2, Math.sin(a) * sp).addScaledVector(up, sp * (0.5 + Math.random()));
+      launchDebris(this.makeDmgCtx(), g, p.clone().addScaledVector(up, 0.4), new THREE.Quaternion(), kick, 0.25, fi, { life: 30, ang: 6, mass: 40 });
+    }
+    this.fxLights.flash(p.clone().sub(this.origin).addScaledVector(up, 2), 0xffb070, 300 * (0.3 + size), 0.3, 200);
+    // jejak hangus permanen
+    if (P.isTerrain) {
+      const dl = P.toLocal(new THREE.Vector3().copy(p).sub(P.pos).normalize(), new THREE.Vector3());
+      const rs = P.surfaceRadius(dl);
+      const m = new THREE.Mesh(new THREE.CircleGeometry(1.5 + size * 3, 18), new THREE.MeshBasicMaterial({ color: 0x050403, transparent: true, opacity: 0.65, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+      m.position.copy(dl).multiplyScalar(rs + 0.25);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dl);
+      P.spinG.add(m);
+      this.craters.push(m);
+      if (this.craters.length > 30) { const o = this.craters.shift()!; o.removeFromParent(); o.geometry.dispose(); }
+    }
+  }
+
+  private onMeteorImpact(dist: number, p: THREE.Vector3, up: THREE.Vector3) {
     const k = clamp(1 - dist / 500);
     this.shake = Math.max(this.shake, 0.14 * k);
+    // massa efektif & energi kinetik (kecepatan ≈14 km/s di tanpa atmosfer)
+    const mass = 0.0005 * Math.pow(10, 2.8 * Math.pow(Math.random(), 2.2));
+    const E = 0.5 * mass * 14000 * 14000;
+    const size = clamp(Math.log10(E / 1e5) / 2.2, 0.1, 1.2);
+    this.groundFx(p, up, size);
+    if (dist < 300) this.audio.impact(clamp(0.3 + size * 0.5), clamp(1 - dist / 300));
     if (dist < 220) this.audio.thunk();
-    if (this.mode === 'eva' && !this.rv.riding && dist < 14) {
-      this.suit = Math.max(0, this.suit - 0.22);
-      this.astro.vel.add(new THREE.Vector3((Math.random() - 0.5) * 10, 5, (Math.random() - 0.5) * 10));
-      this.toast('☄ Terkena pecahan meteor!', 'warn');
-      this.audio.warn();
+    // habitat terkena langsung atau serpihan
+    for (const h of this.habs) {
+      if (h.kind !== 'base') continue;
+      const d0 = h.pos.distanceTo(p);
+      if (d0 > 80) continue;
+      const loc = h.toLocalPoint(p, new THREE.Vector3());
+      let best: PlacedMod | null = null, bd = 1e9;
+      for (const m of h.mods.values()) { const dd = Math.hypot(loc.x - m.ix * CELL, loc.z - m.iz * CELL); if (dd < bd) { bd = dd; best = m; } }
+      if (!best) continue;
+      if (bd < 3.0) {
+        this.dmg.hitModule(h, best.key, E, up, 'tumbukan meteor', { fire: 0.1 });
+      } else if (bd < 55) {
+        const f = (1 - bd / 55) ** 2;
+        const dirIn = new THREE.Vector3(p.x - h.pos.x, 0, p.z - h.pos.z).normalize().addScaledVector(up, 0.4).normalize();
+        this.dmg.hitModule(h, best.key, E * 0.05 * f, dirIn, 'serpihan meteor', { quiet: true });
+      }
+    }
+    // kapal yang mendarat didekatnya
+    if (this.landed && this.contact) {
+      const ds = this.shipPos.distanceTo(p);
+      if (ds < 4) this.damageHull(clamp(PH.impactDamage(E, 0)), 'tumbukan meteor', false, up);
+      else if (ds < 50) this.damageHull(PH.impactDamage(E * 0.04 * (1 - ds / 50) ** 2, 0), 'serpihan meteor', false, this.v5.copy(p).sub(this.shipPos).normalize().clone());
+    }
+    if (this.mode === 'eva' && !this.rv.riding) {
+      const de = this.astro.pos.distanceTo(p);
+      if (de < 14) {
+        this.suit = Math.max(0, this.suit - 0.22 * (1 - de / 18));
+        this.astro.vel.add(new THREE.Vector3((Math.random() - 0.5) * 10, 5, (Math.random() - 0.5) * 10));
+        this.toast('☄ Terkena pecahan meteor!', 'warn');
+        this.audio.warn();
+      }
     }
   }
 
@@ -1879,7 +2301,7 @@ export class Engine {
   /** Batasi dorong per sumbu kapal: mesin utama (+X, rem sebagian), thruster vertikal dan samping */
   private clampThrust(a: THREE.Vector3, Q: THREE.Quaternion, boost: number, fac: number) {
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(Q), u = new THREE.Vector3(0, 1, 0).applyQuaternion(Q), r = new THREE.Vector3(1, 0, 0).applyQuaternion(Q);
-    const af = clamp(a.dot(f), -0.35 * SHIP.aMain * fac, SHIP.aMain * boost * fac);
+    const af = clamp(a.dot(f), -0.35 * SHIP.aMain * fac, SHIP.aMain * boost * fac * this.shipDmg.engineFactor);
     const au = clamp(a.dot(u), -SHIP.aVert * fac, SHIP.aVert * fac);
     const ar = clamp(a.dot(r), -4 * fac, 4 * fac);
     return a.set(0, 0, 0).addScaledVector(f, af).addScaledVector(u, au).addScaledVector(r, ar);
@@ -1923,18 +2345,45 @@ export class Engine {
     out.copy(n).multiplyScalar(aFF + (vDes - vn) / 0.5).addScaledVector(vh, -1 / 3).sub(gAcc);
   }
 
-  /** Kerusakan lambung (fraksi 0..1). quiet = kerusakan kontinu (hanya peringatan, tanpa toast berulang) */
-  private damageHull(frac: number, why: string, quiet = false) {
-    if (frac <= 0 || this.invuln > 0) return;
+  /** Kerusakan lambung (fraksi 0..1). quiet = kerusakan kontinu (hanya peringatan, tanpa toast berulang); dir = arah dunia dari kapal menuju sumber benturan */
+  private damageHull(frac: number, why: string, quiet = false, dir?: THREE.Vector3) {
+    if (frac <= 0 || this.invuln > 0 || this.destroyed) return;
     this.hull = Math.max(0, this.hull - frac);
     if (!quiet) {
       this.shake = Math.max(this.shake, Math.min(0.4, 0.05 + frac * 0.8));
       if (frac > 0.015) { this.toast(`Lambung rusak −${Math.round(frac * 100)}% (${why})`, 'warn'); this.audio.warn(); }
+      // kerusakan fisik: penyok, retak kaca, bagian lepas
+      const dl = (dir ?? this.v5.set(0, -1, 0).applyQuaternion(this.shipQuat)).clone().applyQuaternion(this.q3.copy(this.shipQuat).invert());
+      this.shipDmg.hit(frac, dl, why);
     } else {
       this.setWarn(`Lambung rusak: ${why} (${Math.round(this.hull * 100)}%)`, 1.2);
       this.shake = Math.max(this.shake, 0.02);
     }
-    if (this.hull <= 0) this.respawn(why);
+    if (this.hull <= 0) this.destroyShip(why);
+  }
+
+  /** ledakan kapal: bola api, semua bagian terlepas menjadi puing, lalu evakuasi */
+  private destroyShip(why: string) {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.deathT = 2.8;
+    this.deathWhy = why;
+    this.autopilot = false; this.holdMode = false; this.landAssist = false; this.throttle = 0;
+    const P = this.shipFrame.p ?? this.findPrimary(this.shipPos);
+    const fx = this.debris.fx;
+    const att = this.shipFrame.att;
+    fx.withFrame(() => ({ p: P, att }), att, () => {
+      fx.explode(this.shipPos.x, this.shipPos.y, this.shipPos.z, 9, this.shipVel);
+    });
+    for (const id of [...this.rig.parts.keys()]) this.shipDmg.breakPart(id, this.v5.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).normalize().clone());
+    const fi = this.dmg.frameShip();
+    for (let i = 0; i < 18; i++) this.dmg.burstAt(this.shipPos, fi, 1, 22, 1.0, [0xb4bcc6, 0x4a525c, 0xd9692a][i % 3], 20);
+    this.fxLights.flash(this.v5.copy(this.shipPos).sub(this.origin), 0xffc080, 3000, 1.2, 900);
+    this.audio.explosion(2.2, 1);
+    this.shake = 0.6;
+    this.fade = Math.max(this.fade, 0);
+    this.rig.group.visible = false;
+    this.toast(`Kapal meledak (${why})!`, 'warn');
   }
 
   respawn(why: string) {
@@ -1947,6 +2396,7 @@ export class Engine {
     this.autopilot = false; this.holdMode = false; this.landAssist = false; this.docked = null; this.dockAnim = null;
     this.throttle = 0; this.braking = false; this.autoReturn = false;
     this.hull = 1; this.fuel = Math.max(this.fuel, 0.5); this.skinT = 260; this.cabinT = 295; this.suit = 1; this.oxygen = 1;
+    this.destroyed = false; this.deathT = 0; this.rig.group.visible = true; this.shipDmg.repairAll();
     this.landed = false; this.contact = false; this.invuln = 4; this.warp = 1;
     if (st) {
       const dock = st.modulesOf('dock')[0];
@@ -2025,7 +2475,7 @@ export class Engine {
       const relB = new THREE.Vector3().copy(this.shipPos).sub(pb.pos);
       const alt = pb === nb ? env.alt : relB.length() - pb.R;
       rho = PH.atmDensity(pb.phys, alt);
-      const vAir = new THREE.Vector3().copy(this.shipVel).add(P.vel).sub(pb.vel).sub(new THREE.Vector3().copy(pb.omegaVec).cross(relB));
+      const vAir = new THREE.Vector3().copy(this.shipVel).add(P.vel).sub(pb.vel).sub(new THREE.Vector3().copy(pb.omegaVec).cross(relB)).sub(this.windNow);
       vAirMag = vAir.length();
       const c1 = (0.5 * rho * SHIP.cdA) / SHIP.mass;
       if (c1 * vAirMag * h > 1e-9) this.shipVel.addScaledVector(vAir, 1 / (1 + c1 * vAirMag * h) - 1);
@@ -2064,9 +2514,9 @@ export class Engine {
       const vs = this.shipVel.clone().sub(vsurf);
       const vn = vs.dot(n);
       if (vn < 0) {
-        const dm = PH.impactDamage(PH.kineticEnergy(SHIP.mass, -vn), SHIP.legAbsorb);
+        const dm = PH.impactDamage(PH.kineticEnergy(SHIP.mass, -vn), SHIP.legAbsorb * this.shipDmg.legFactor);
         if (-vn > 1.5 && !this.prevContact) { this.audio.touch(); this.shake = Math.max(this.shake, Math.min(0.2, -vn * 0.01)); }
-        if (dm > 0) this.damageHull(dm, `benturan ${(-vn).toFixed(0)} m/s`);
+        if (dm > 0) this.damageHull(dm, `benturan ${(-vn).toFixed(0)} m/s`, false, n.clone().multiplyScalar(-1));
         vs.addScaledVector(n, -vn); // tak lenting
       }
       const vt = vs.clone().addScaledVector(n, -vs.dot(n));
@@ -2098,7 +2548,7 @@ export class Engine {
         const vs = new THREE.Vector3().copy(this.shipVel).add(P.vel).sub(vr);
         const vn = vs.dot(n);
         if (vn < 0) {
-          this.damageHull(PH.impactDamage(PH.kineticEnergy(SHIP.mass, -vn), 0), `asteroid ${(-vn).toFixed(0)} m/s`);
+          this.damageHull(PH.impactDamage(PH.kineticEnergy(SHIP.mass, -vn), 0), `asteroid ${(-vn).toFixed(0)} m/s`, false, n.clone().multiplyScalar(-1));
           this.audio.touch(); this.shake = Math.max(this.shake, 0.12);
           vs.addScaledVector(n, -vn * 1.2);
           this.shipVel.copy(vs).add(vr).sub(P.vel);
@@ -2113,12 +2563,20 @@ export class Engine {
     if (this.invuln > 0) this.invuln -= dt;
     if (this.dmgToastT > 0) this.dmgToastT -= dt;
     this.updateOrbitInfo();
+    if (this.destroyed) {
+      this.deathT -= dt;
+      this.throttle = 0; this.thrustAcc.set(0, 0, 0);
+      this.shipPos.addScaledVector(this.shipVel, dt);
+      if (this.deathT <= 0) this.respawn(this.deathWhy);
+      return;
+    }
     if (this.docked) {
       this.contact = false; this.landed = false; this.throttle = 0; this.holdMode = false; this.landAssist = false;
       this.thrustAcc.set(0, 0, 0);
       this.shipVel.copy(this.docked.vel).sub(this.findPrimary(this.shipPos).vel);
       this.fuel = Math.min(1, this.fuel + dt * 0.02); // isi ulang di dermaga
-      this.hull = Math.min(1, this.hull + dt * 0.004);
+      this.hull = Math.min(1, this.hull + dt * 0.012);
+      if (this.hull >= 0.995 && (this.shipDmg.lost.size || this.shipDmg.burning > 0)) { this.shipDmg.repairAll(); this.toast('Perbaikan lambung & bagian kapal selesai', 'discover'); }
       return;
     }
     const Q = this.shipQuat;
@@ -2141,7 +2599,7 @@ export class Engine {
     } else if (piloting && !this.lookMode) {
       const cv = (v: number) => Math.sign(v) * Math.pow(Math.abs(v), 1.5);
       const landedLock = this.contact && this.landed;
-      const rate = 0.95;
+      const rate = 0.95 * this.shipDmg.wingFactor;
       const sx = cv(clamp(inp.steerX + this.mouseSteer.x, -1, 1)), sy = landedLock ? 0 : cv(clamp(inp.steerY + this.mouseSteer.y, -1, 1)), rl = landedLock ? 0 : inp.roll;
       this.q1.setFromAxisAngle(Y, -sx * rate * dt);
       this.q2.setFromAxisAngle(X, sy * rate * dt);
@@ -2649,6 +3107,8 @@ export class Engine {
 
     // langit / kabut
     for (const b of this.bodies) { b.fogD.value = 0; if (b.gasU) b.gasU.uFog.value = 0; }
+    if (this.world.fog !== this.hazFog) this.world.fog = this.hazFog;
+    this.hazFog.density = 0;
     let skyBright = 0;
     let dimK = 0;
     this.heat = 0;
@@ -2675,10 +3135,18 @@ export class Engine {
       if (hz && hz.bodyId === b.id && hz.k > 0.01) {
         const info = HAZARDS[hz.type];
         b.fogD.value *= 1 + (info.fogMul - 1) * hz.k;
+        // visibilitas nyata: pasir/abu ±100 m, hujan lebat ±250 m (kabut exp²: ff = 1 − e^(−(D·d)²))
+        if (info.fogMul > 8) {
+          const fd = (hz.type === 'dust' || hz.type === 'ash' ? 0.013 : 0.004) * hz.k;
+          b.fogD.value = Math.max(b.fogD.value, fd);
+          // objek di adegan dunia (habitat, rover, puing) ikut berkabut dengan kepadatan yang sama
+          this.hazFog.density = fd;
+        }
         if (info.fog[0] + info.fog[1] + info.fog[2] > 0) {
           const m = hz.k * 0.9;
           c.setRGB(c.r * (1 - m) + info.fog[0] * base * m, c.g * (1 - m) + info.fog[1] * base * m, c.b * (1 - m) + info.fog[2] * base * m);
         }
+        if (info.fogMul > 8) this.hazFog.color.copy(c);
         if (info.fogMul > 8) skyBright = Math.max(skyBright, hz.k * 0.75 * sunlit);
         dimK = info.fogMul > 8 ? hz.k : hz.k * 0.4;
       }
@@ -2693,7 +3161,17 @@ export class Engine {
       const ah = this.hazards.active;
       const fup = nb ? this.v3.copy(camWorld).sub(nb.pos).normalize() : this.v3.set(0, 1, 0);
       const local = ah && nb && ah.bodyId === nb.id && ah.type !== 'flare';
-      this.fx.update(dt, origin, fup, local ? ah!.type : null, local ? ah!.k : 0, camWorld, clamp(env.dens, 0, 1));
+      const wl = nb ? smooth(-0.1, 0.35, fup.dot(this.v4.copy(this.sun.pos).sub(nb.pos).normalize())) : 1;
+      const tg: THREE.Vector3[] = [];
+      if (local && ah!.type === 'meteor') {
+        for (const h of this.habs) if (h.kind === 'base' && h.body === nb && h.pos.distanceTo(camWorld) < 500) tg.push(h.pos);
+        if (this.landed && this.contact) tg.push(this.shipPos);
+      }
+      this.fx.update(dt, origin, fup, local ? ah!.type : null, local ? ah!.k : 0, camWorld, clamp(env.dens, 0, 1), { light: 0.2 + 0.8 * wl, groundDist: Math.max(0, env.alt - (this.mode === 'eva' ? 1.7 : 0)), targets: tg, gust: this.gustAt(this.time) });
+      this.debris.update(dt, origin, this.debrisEnv);
+      this.fxLights.update(dt);
+      this.shipFx.update(dt);
+      this.shipDmg.tick(dt, this.hull, this.mode !== 'eva' && this.mode !== 'hab');
     }
     this.stars.starMat.opacity = 1 - skyBright;
     this.stars.mwMat.opacity = 1 - skyBright;
@@ -2782,6 +3260,8 @@ export class Engine {
       if (this.walkPos.x > 0.7 && this.walkPos.z > 4.0) return { text: this.linkHab ? `Pindah ke ${this.linkHab.name}` : 'Keluar kapal (EVA)', action: 'exit' };
     }
     if (this.mode === 'hab' && this.inHab) {
+      const pm = this.playerModuleKey();
+      if (pm && pm.h.getDmg(pm.key).fire > 0.03) return { text: '🧯 Padamkan api', action: 'extinguish' };
       const it = this.inHab.interactionAt(this.walkPos.x, this.walkPos.z);
       if (it) return { text: it.text, action: 'h:' + it.action };
     }
@@ -2791,6 +3271,8 @@ export class Engine {
       if (this.astro.pos.distanceTo(hatchW) < 7) return { text: 'Masuk kapal', action: 'enter' };
       const hh = this.nearestHatch();
       if (hh) return { text: `Masuk ${hh.h.name}`, action: 'habin' };
+      const nd = this.nearDamaged();
+      if (nd) return { text: `🔧 Perbaiki ${MOD_DEFS[nd.h.mods.get(nd.key)!.type].name} (◈${nd.cost})`, action: 'repair-ext' };
       if (this.nearestSample(4.5)) return { text: 'Ambil sampel', action: 'sample' };
       if (this.rv.deployed && this.rv.pos.distanceTo(this.astro.pos) < 9) return { text: 'Naiki Rover', action: 'mount' };
       const fa = this.unscanned('fauna', 25);
@@ -2899,6 +3381,9 @@ export class Engine {
       orbit: { ...this.orb }, warp: this.warp, warpNow: this.warpNow, hold: this.holdMode, landAssist: this.landAssist,
       gForce: this.gForce, thrust: this.thrustAcc.length(), qDyn: this.fl.qDyn, rho: this.fl.rho, tAmb: this.fl.tAmb, pAmb: this.fl.pAmb,
       solar: this.fl.solar, jetDv: this.jetDv, primaryR: (this.shipFrame.p ?? this.sun).R,
+      habStat: this.inHab ? { name: this.inHab.name, hp: this.inHab.worstHp, pressure: this.inHab.pressure, fire: this.inHab.onFire, leak: this.inHab.totalLeak > 0, modules: this.inHab.mods.size, damaged: this.inHab.damagedKeys().length } : null,
+      parts: { lost: [...this.shipDmg.lost].map((i) => this.shipDmg.partLabel(i)), total: this.rig.parts.size },
+      windQ: this.windQ, destroyed: this.destroyed,
     };
   }
 
@@ -3016,7 +3501,10 @@ export class Engine {
         this.habLight.position.applyQuaternion(hab.quat).add(hab.int.position);
         const m = hab.getMod(Math.round(this.walkPos.x / CELL), Math.round(this.walkPos.z / CELL));
         if (m) this.habLight.color.setHex(MOD_DEFS[m.type].color).lerp(this.col0.setHex(0xfff0dd), 0.75);
-        target = 5.8 * (0.25 + 0.75 * rat) * (rat < 0.6 ? 0.8 + 0.2 * Math.random() : 1) * rad;
+        const mk = m ? hab.dmg.get(m.key) : undefined;
+        if (hab.alarm > 0.3) this.habLight.color.lerp(this.col0.setRGB(1, 0.12, 0.08), 0.6 * (0.5 + 0.5 * Math.sin(t * 7)));
+        if (mk && mk.fire > 0.03) this.habLight.color.lerp(this.col0.setRGB(1, 0.5, 0.15), 0.6);
+        target = 5.8 * (0.25 + 0.75 * rat) * (rat < 0.6 ? 0.8 + 0.2 * Math.random() : 1) * rad * (mk && mk.hp < 0.4 && Math.random() < 0.2 ? 0.25 : 1) * (mk && mk.fire > 0.03 ? 0.8 + 0.5 * Math.random() : 1);
       }
       this.habLight.intensity += (target - this.habLight.intensity) * 0.25;
       const shipOn = this.mode === 'hab' ? 0 : 1;
@@ -3027,6 +3515,7 @@ export class Engine {
     rig.lights.cockpit.intensity = (this.mode === 'hab' ? 0 : 1) * (3.4 + Math.sin(t * 5) * 0.1 * this.heat + this.heat * 4);
     if (this.heat > 0.1) rig.lights.cockpit.color.setRGB(1, 0.6 + 0.4 * (1 - this.heat), 0.4 + 0.6 * (1 - this.heat));
     else rig.lights.cockpit.color.setHex(0x88ccff);
+    if (this.shipDmg.emerg > 0) { rig.lights.cockpit.color.lerp(this.col0.setRGB(1, 0.1, 0.08), this.shipDmg.emerg); rig.lights.cockpit.intensity *= 1 + 0.8 * this.shipDmg.emerg; }
   }
 
   render() {

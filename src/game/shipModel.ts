@@ -35,6 +35,8 @@ export interface ShipRig {
   fans: THREE.Mesh[];
   reactor: THREE.Mesh;
   exteriorOnly: THREE.Object3D[];
+  /** bagian eksterior yang dapat lepas/rusak: id → objek-objeknya */
+  parts: Map<string, THREE.Object3D[]>;
 }
 
 function makeScreen(w = 256, h = 160): Screen {
@@ -60,6 +62,7 @@ export function buildShip(): ShipRig {
   const colliders: Rect[] = [];
   const blinkers: ShipRig['blinkers'] = [];
   const exteriorOnly: THREE.Object3D[] = [];
+  const parts = new Map<string, THREE.Object3D[]>();
 
   const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, p: THREE.Object3D = g) => {
     const me = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
@@ -414,6 +417,7 @@ export function buildShip(): ShipRig {
   box(4.2, 0.1, 0.3, 0, 1.06, -5.4, hullD);
   // sayap
   for (const s of [-1, 1]) {
+    const n0 = g.children.length;
     const w = box(4.2, 0.16, 3.2, s * 4.0, 0.7, 3.6, hull);
     w.rotation.z = s * -0.05;
     w.rotation.y = s * 0.12;
@@ -424,17 +428,22 @@ export function buildShip(): ShipRig {
     cyl(0.22, 0.22, 0.3, s * 3.0, 0.58, 6.7, dark, [Math.PI / 2, 0, 0], g, 16);
     cyl(0.12, 0.12, 0.05, s * 3.0, 0.58, 6.86, amber, [Math.PI / 2, 0, 0], g, 16);
     blink(s * 6.1, 0.82, 4.2, s < 0 ? red : green, 1.2, 0.07);
+    parts.set(s < 0 ? 'wingL' : 'wingR', g.children.slice(n0));
   }
   // sirip ekor + antena + parabola
+  const nFin = g.children.length;
   box(0.12, 1.6, 1.6, 0, 3.5, 6.0, hull);
   box(0.14, 0.3, 1.0, 0, 4.3, 6.2, accent);
   blink(0, 4.5, 6.5, white, 1.5, 0.07);
+  parts.set('fin', g.children.slice(nFin));
+  const nDish = g.children.length;
   cyl(0.02, 0.02, 1.3, 0.6, 3.4, 0.8, metal);
   const dish = new THREE.Mesh(new THREE.SphereGeometry(0.4, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.5), metal);
   dish.position.set(-0.8, 3.0, 1.5);
   dish.rotation.x = -0.8;
   g.add(dish);
   cyl(0.03, 0.03, 0.4, -0.8, 2.85, 1.5, metal);
+  parts.set('dish', g.children.slice(nDish));
   box(2.2, 0.1, 5.2, 0, 2.86, 1.2, hullD);
   for (let i = 0; i < 6; i++) box(0.5, 0.03, 0.2, -0.9 + (i % 3) * 0.9, 2.93, 0.2 + Math.floor(i / 3) * 3.4, i % 2 ? accent : metal);
   // nama kapal
@@ -464,10 +473,13 @@ export function buildShip(): ShipRig {
     g.add(lg);
     legs.push(lg);
   }
+  legs.forEach((l, i) => parts.set('leg' + i, [l]));
   // mesin utama + nyala
   const engineGlows: THREE.Mesh[] = [];
+  let engI = 0;
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x66c8ff, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
   for (const [x, y] of [[0, 1.3], [-0.9, 0.8], [0.9, 0.8]] as [number, number][]) {
+    const nEng = g.children.length;
     cyl(0.32, 0.45, 0.6, x, y, 7.4, dark, [Math.PI / 2, 0, 0], g, 16);
     cyl(0.4, 0.4, 0.04, x, y, 7.7, hullD, [Math.PI / 2, 0, 0], g, 16);
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.36, 3.0, 14, 1, true), glowMat.clone());
@@ -480,6 +492,7 @@ export function buildShip(): ShipRig {
     core.rotation.x = Math.PI / 2;
     g.add(core);
     engineGlows.push(core);
+    parts.set('engine' + engI++, g.children.slice(nEng));
   }
   // sensor, lampu depan
   for (const s of [-1, 1]) {
@@ -512,6 +525,6 @@ export function buildShip(): ShipRig {
     yoke, holo, holoPlanets, holoShip, blinkers, engineGlows, engineLight,
     hatch, hatchLamp,
     lights: { cockpit: cockpitL, cabin: cabinL, airlock: airL, hemi },
-    sun, colliders, legs, fans, reactor, exteriorOnly,
+    sun, colliders, legs, fans, reactor, exteriorOnly, parts,
   };
 }

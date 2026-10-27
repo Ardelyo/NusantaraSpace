@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Body } from './body';
+import { FxSet } from './effects';
 
 export const CELL = 6; // sel modul 6 m x 6 m
 export const DOCK_GAP = 5.45; // jarak hatch kapal dari kerah dermaga saat tersandar (pipa teleskopik)
@@ -447,7 +448,7 @@ function buildInterior(type: ModType, openL: boolean[], portL: boolean[]): IntOu
 }
 
 // ------------------------------------------------------------------ builder: EKSTERIOR
-interface ExtOut { group: THREE.Group; blinkers: THREE.Mesh[] }
+interface ExtOut { group: THREE.Group; blinkers: THREE.Mesh[]; parts: Map<string, THREE.Group> }
 
 const REACH: Record<ModType, number> = { hub: 2.5, corridor: 3, airlock: 2.9, dock: 2.8, hab: 2.5, lab: 2.5, greenhouse: 2.5, power: 2.2, storage: 2.5, garage: 2.7, comms: 1.9 };
 
@@ -460,6 +461,20 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
   const panelM = ST(0x1a3a7a, 0.7, 0.3, 0x0a1a3a);
   const H = MOD_H;
   const bw = BODY_HALF * 2;
+  // bagian yang bisa lepas (diganti puing berfisika saat rusak)
+  const parts = new Map<string, THREE.Group>();
+  const part = (id: string, fn: (pb: Batch) => void) => {
+    const pb = new Batch();
+    fn(pb);
+    const gr = pb.build();
+    gr.name = 'part:' + id;
+    gr.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(gr);
+    const c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+    gr.userData.center = [c.x, c.y, c.z];
+    gr.userData.radius = Math.max(0.2, Math.max(sz.x, sz.y, sz.z) / 2);
+    parts.set(id, gr);
+  };
 
   // badan utama
   switch (type) {
@@ -468,7 +483,7 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
       b.cyl(BODY_HALF + 0.08, BODY_HALF + 0.08, 0.12, 0, 0.6, 0, accent, undefined, 28);
       b.cyl(BODY_HALF + 0.08, BODY_HALF + 0.08, 0.12, 0, H - 0.2, 0, hullD, undefined, 28);
       b.dome(1.4, 0, H, 0, hull, 18, [1, 0.5, 1]);
-      b.cyl(0.04, 0.04, 1.4, 0, H + 0.9, 0, metal, undefined, 6);
+      part('antenna', (pb) => pb.cyl(0.04, 0.04, 1.4, 0, H + 0.9, 0, metal, undefined, 6));
       for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; b.box(0.5, 0.5, 0.06, Math.cos(a) * 2.5, 1.7, Math.sin(a) * 2.5, win, [0, -a + Math.PI / 2, 0]); }
       break;
     }
@@ -496,10 +511,10 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
       b.cyl(2.0, 1.1, 1.2, 0, H / 2, -1.9, hullD, [Math.PI / 2, 0, 0], 22);
       b.torus(1.12, 0.12, 0, H / 2, -2.5, accent, undefined, 28);
       for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), (i % 2 ? E(0xffb030) : E(0x45e3ff)).clone()); m.position.set(Math.cos(a) * 1.4, H / 2 + Math.sin(a) * 1.4, -2.55); blink.push(m); }
-      for (const sx of [-1, 1]) {
-        b.box(0.1, 0.1, 1.8, sx * 1.2, H / 2 + 1.7, -2.9, accent, [0, 0, 0]);
-        b.box(0.1, 1.8, 0.1, sx * 1.2, H / 2 + 0.9, -3.8, accent);
-      }
+      part('arms', (pb) => { for (const sx of [-1, 1]) {
+        pb.box(0.1, 0.1, 1.8, sx * 1.2, H / 2 + 1.7, -2.9, accent, [0, 0, 0]);
+        pb.box(0.1, 1.8, 0.1, sx * 1.2, H / 2 + 0.9, -3.8, accent);
+      } });
       b.box(2.6, 0.08, 1.4, 0, 0.05, 2.6, hullD);
       break;
     }
@@ -511,7 +526,7 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
         b.box(0.06, 0.55, 0.8, sx * 2.52, 1.7, -1.4 + i * 1.4, win);
         b.box(0.8, 0.55, 0.06, -1.4 + i * 1.4, 1.7, sx * 2.52, win);
       }
-      b.box(2.4, 0.08, 1.2, 0, H + 0.04, 0, ST(0x1a3a7a, 0.7, 0.3, 0x0a1a3a));
+      part('roof', (pb) => pb.box(2.4, 0.08, 1.2, 0, H + 0.04, 0, ST(0x1a3a7a, 0.7, 0.3, 0x0a1a3a)));
       break;
     }
     case 'lab': {
@@ -520,17 +535,17 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
       b.box(bw + 0.06, 0.1, bw + 0.06, 0, H - 0.1, 0, hullD);
       b.box(0.06, 0.9, 3.4, 2.52, 1.7, 0, E(0x7affd0));
       b.box(3.4, 0.9, 0.06, 0, 1.7, 2.52, E(0x7affd0));
-      b.cyl(0.04, 0.04, 0.9, 1.0, H + 0.45, 1.0, metal, undefined, 6);
-      b.dome(0.55, 1.0, H + 0.9, 1.0, metal, 14);
-      b.cyl(0.18, 0.18, 0.7, -1.2, H + 0.35, -1.0, hullD, undefined, 10);
-      b.box(1.0, 0.2, 1.0, -1.2, H + 0.1, -1.0, hullD);
+      part('sensor', (pb) => { pb.cyl(0.04, 0.04, 0.9, 1.0, H + 0.45, 1.0, metal, undefined, 6); pb.dome(0.55, 1.0, H + 0.9, 1.0, metal, 14); });
+      part('tank', (pb) => { pb.cyl(0.18, 0.18, 0.7, -1.2, H + 0.35, -1.0, hullD, undefined, 10); pb.box(1.0, 0.2, 1.0, -1.2, H + 0.1, -1.0, hullD); });
       break;
     }
     case 'greenhouse': {
       b.box(bw, 0.9, bw, 0, 0.45, 0, hull);
       b.box(bw + 0.08, 0.1, bw + 0.08, 0, 0.9, 0, accent);
-      b.cyl(BODY_HALF * 0.98, BODY_HALF * 0.98, bw, 0, 0.9, 0, GLASS_E, [Math.PI / 2, 0, 0], 20);
-      for (let z = -2.2; z <= 2.3; z += 1.1) b.torus(BODY_HALF * 0.98, 0.04, 0, 0.9, z, metal, undefined, 20);
+      part('glass', (pb) => {
+        pb.cyl(BODY_HALF * 0.98, BODY_HALF * 0.98, bw, 0, 0.9, 0, GLASS_E, [Math.PI / 2, 0, 0], 20);
+        for (let z = -2.2; z <= 2.3; z += 1.1) pb.torus(BODY_HALF * 0.98, 0.04, 0, 0.9, z, metal, undefined, 20);
+      });
       b.cyl(0.04, 0.04, bw, 0, 3.4, 0, metal, [Math.PI / 2, 0, 0], 6);
       for (let i = 0; i < 9; i++) b.sph(0.18, -1.7 + (i % 3) * 1.7, 1.3, -1.8 + Math.floor(i / 3) * 1.8, E(0x6cff6c, 0.55), 6);
       b.box(bw - 0.4, 0.08, bw - 0.4, 0, 0.98, 0, E(0xc060ff, 0.5));
@@ -543,11 +558,11 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
       b.sph(0.35, 0, H + 1.2, 0, E(0x3aa8ff), 10);
       // lengan panel surya
       b.box(0.14, 0.14, 7.0, 0, 2.2, 0, metal, [0, Math.PI / 2, 0]);
-      for (const sx of [-1, 1]) {
-        b.box(3.3, 0.06, 2.4, sx * 2.6, 2.2, -0.6, panelM, [0.0, 0, 0]);
-        b.box(3.3, 0.06, 2.4, sx * 2.6, 2.2, 1.8, panelM, [0.0, 0, 0]);
-        b.box(3.4, 0.03, 0.04, sx * 2.6, 2.24, 0.6, metal);
-      }
+      for (const sx of [-1, 1]) part(sx < 0 ? 'panelL' : 'panelR', (pb) => {
+        pb.box(3.3, 0.06, 2.4, sx * 2.6, 2.2, -0.6, panelM, [0.0, 0, 0]);
+        pb.box(3.3, 0.06, 2.4, sx * 2.6, 2.2, 1.8, panelM, [0.0, 0, 0]);
+        pb.box(3.4, 0.03, 0.04, sx * 2.6, 2.24, 0.6, metal);
+      });
       for (const sx of [-1, 1]) b.box(0.05, 1.8, 1.2, sx * 1.75, 1.6, -1.9, ST(0xe8ecf0, 0.5, 0.6));
       break;
     }
@@ -555,7 +570,7 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
       b.box(bw, H, bw, 0, H / 2, 0, ST(0xb4bcc6, 0.45, 0.55));
       for (let z = -2; z <= 2.1; z += 1) b.box(bw + 0.08, H, 0.06, 0, H / 2, z, hullD);
       b.box(bw + 0.1, 0.14, bw + 0.1, 0, 0.55, 0, accent);
-      for (let i = 0; i < 3; i++) b.box(1.3, 0.9, 1.3, -1.4 + i * 1.4, H + 0.45, (i % 2) * 0.8 - 0.4, ST([0xd9692a, 0x2c5a82, 0xa0a8b2][i], 0.3, 0.6));
+      part('cargo', (pb) => { for (let i = 0; i < 3; i++) pb.box(1.3, 0.9, 1.3, -1.4 + i * 1.4, H + 0.45, (i % 2) * 0.8 - 0.4, ST([0xd9692a, 0x2c5a82, 0xa0a8b2][i], 0.3, 0.6)); });
       break;
     }
     case 'garage': {
@@ -572,10 +587,12 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
       b.cyl(1.7, 1.9, 1.4, 0, 0.7, 0, hull, undefined, 18);
       b.cyl(1.8, 1.8, 0.14, 0, 0.9, 0, accent, undefined, 18);
       b.cyl(0.08, 0.14, 4.4, 0, 3.6, 0, metal, undefined, 8);
-      b.dome(1.25, 0, 3.0, 0, ST(0xe8ecf0, 0.6, 0.4), 22, [1, 1.1, 1]);
-      b.cyl(0.04, 0.04, 1.0, 0, 6.2, 0, metal, undefined, 6);
-      for (let i = 0; i < 3; i++) b.cyl(0.02, 0.02, 1.5, Math.cos(i * 2.1) * 0.5, 4.6, Math.sin(i * 2.1) * 0.5, metal, undefined, 4);
-      b.box(1.6, 0.12, 0.12, 0, 5.6, 0, red);
+      part('dish', (pb) => pb.dome(1.25, 0, 3.0, 0, ST(0xe8ecf0, 0.6, 0.4), 22, [1, 1.1, 1]));
+      part('mast', (pb) => {
+        pb.cyl(0.04, 0.04, 1.0, 0, 6.2, 0, metal, undefined, 6);
+        for (let i = 0; i < 3; i++) pb.cyl(0.02, 0.02, 1.5, Math.cos(i * 2.1) * 0.5, 4.6, Math.sin(i * 2.1) * 0.5, metal, undefined, 4);
+        pb.box(1.6, 0.12, 0.12, 0, 5.6, 0, red);
+      });
       break;
     }
   }
@@ -616,14 +633,124 @@ function buildExterior(type: ModType, openL: boolean[], portL: boolean[], founda
 
   const g = b.build();
   for (const m of blink) g.add(m);
+  for (const gr of parts.values()) g.add(gr);
   void glow; void white;
-  return { group: g, blinkers: blink };
+  return { group: g, blinkers: blink, parts };
+}
+
+
+// ------------------------------------------------------------------ kerusakan struktur
+export interface Dent { p: [number, number, number]; n: [number, number, number]; r: number; burn: number; hole: boolean }
+export interface ModDamage { hp: number; fire: number; dents: Dent[]; lost: string[]; dust: number; ash: number }
+export interface DmgSave { key: string; hp: number; fire: number; dents: Dent[]; lost: string[] }
+
+/** energi (J) yang dapat diserap tiap jenis modul sebelum hancur */
+export const MOD_STRENGTH: Record<ModType, number> = {
+  hub: 9e6, corridor: 3.5e6, airlock: 6e6, dock: 6e6, hab: 6e6, lab: 5e6, greenhouse: 2.6e6, power: 5e6, storage: 4.5e6, garage: 6e6, comms: 3e6,
+};
+/** beban atap (kg/m²) sebelum runtuh: modul berkubah/bertabung lebih kuat daripada pelat datar */
+export const ROOF_LOAD: Record<ModType, number> = {
+  hub: 520, corridor: 600, airlock: 600, dock: 520, hab: 380, lab: 380, greenhouse: 140, power: 300, storage: 380, garage: 380, comms: 520,
+};
+/** bentuk cangkang untuk menempatkan penyok tepat di permukaan */
+const SHELL: Record<ModType, { k: 'box' | 'vcyl' | 'zcyl'; a: number; h: number; zc?: number; zl?: number }> = {
+  hub: { k: 'vcyl', a: 2.5, h: 3 }, corridor: { k: 'zcyl', a: 1.3, h: 3, zc: 0, zl: 3 }, airlock: { k: 'zcyl', a: 1.55, h: 3, zc: 0.7, zl: 2.2 },
+  dock: { k: 'zcyl', a: 1.7, h: 3, zc: 1.0, zl: 1.8 }, hab: { k: 'box', a: 2.5, h: 3 }, lab: { k: 'box', a: 2.5, h: 3 }, greenhouse: { k: 'box', a: 2.5, h: 1.8 },
+  power: { k: 'box', a: 1.9, h: 3 }, storage: { k: 'box', a: 2.5, h: 3 }, garage: { k: 'box', a: 2.5, h: 3 }, comms: { k: 'vcyl', a: 1.7, h: 1.4 },
+};
+
+/** titik pada cangkang modul (koordinat lokal modul) untuk arah d dari pusat; mengisi n dengan normal luar */
+export function shellPoint(type: ModType, d: THREE.Vector3, p: THREE.Vector3, n: THREE.Vector3) {
+  const sh = SHELL[type];
+  const dir = d.clone().normalize();
+  const cy = sh.h / 2;
+  if (sh.k === 'box') {
+    const tx = Math.abs(dir.x) > 1e-6 ? sh.a / Math.abs(dir.x) : 1e9;
+    const tz = Math.abs(dir.z) > 1e-6 ? sh.a / Math.abs(dir.z) : 1e9;
+    const ty = dir.y > 1e-6 ? (sh.h - cy) / dir.y : dir.y < -1e-6 ? cy / -dir.y : 1e9;
+    const t = Math.min(tx, tz, ty);
+    p.set(dir.x * t, cy + dir.y * t, dir.z * t);
+    if (t === ty) n.set(0, Math.sign(dir.y) || 1, 0); else if (t === tx) n.set(Math.sign(dir.x), 0, 0); else n.set(0, 0, Math.sign(dir.z));
+  } else if (sh.k === 'vcyl') {
+    const hz = Math.hypot(dir.x, dir.z);
+    const ts = hz > 1e-6 ? sh.a / hz : 1e9;
+    const ty = dir.y > 1e-6 ? (sh.h - cy) / dir.y : dir.y < -1e-6 ? cy / -dir.y : 1e9;
+    const t = Math.min(ts, ty);
+    p.set(dir.x * t, cy + dir.y * t, dir.z * t);
+    if (t === ty) n.set(0, Math.sign(dir.y) || 1, 0); else n.set(dir.x / hz, 0, dir.z / hz);
+  } else {
+    const hr = Math.hypot(dir.x, dir.y);
+    const ts = hr > 1e-6 ? sh.a / hr : 1e9;
+    const half = (sh.zl ?? 3) / 2;
+    const tz = Math.abs(dir.z) > 1e-6 ? half / Math.abs(dir.z) : 1e9;
+    const cz = sh.zc ?? 0;
+    // arah dari pusat (0, 1.5, cz)
+    if (ts <= tz) { p.set(dir.x * ts, 1.5 + dir.y * ts, cz + dir.z * ts); n.set(dir.x / hr, dir.y / hr, 0); }
+    else { p.set(dir.x * tz, 1.5 + dir.y * tz, cz + dir.z * tz); n.set(0, 0, Math.sign(dir.z) || 1); }
+  }
+}
+
+const DENT_Y = new THREE.Vector3(0, 1, 0);
+const dentMats = {
+  scorch: new THREE.MeshBasicMaterial({ color: 0x050403, transparent: true, opacity: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+  funnel: new THREE.MeshStandardMaterial({ color: 0x2b2d31, metalness: 0.7, roughness: 0.75, side: THREE.DoubleSide }),
+  rim: new THREE.MeshStandardMaterial({ color: 0x8c939c, metalness: 0.75, roughness: 0.45 }),
+  hole: new THREE.MeshBasicMaterial({ color: 0x020203 }),
+  glow: new THREE.MeshBasicMaterial({ color: 0xff8a2a, toneMapped: false }),
+};
+export function dentMesh(d: Dent): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(d.p[0], d.p[1], d.p[2]);
+  g.quaternion.setFromUnitVectors(DENT_Y, new THREE.Vector3(d.n[0], d.n[1], d.n[2]));
+  const scorch = new THREE.Mesh(new THREE.CircleGeometry(d.r * (2.0 + d.burn * 1.6), 22), dentMats.scorch);
+  scorch.rotation.x = -Math.PI / 2; scorch.position.y = 0.012;
+  g.add(scorch);
+  const depth = d.r * (d.hole ? 1.4 : 0.65);
+  const fun = new THREE.Mesh(new THREE.ConeGeometry(d.r, depth, 14, 1, true), dentMats.funnel);
+  fun.rotation.x = Math.PI; fun.position.y = -depth / 2 + 0.02;
+  g.add(fun);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(d.r * 1.02, d.r * 0.14, 6, 16), dentMats.rim);
+  rim.rotation.x = Math.PI / 2; rim.position.y = 0.025; rim.scale.set(1, 1, 1.3 + Math.random() * 0.5);
+  g.add(rim);
+  if (d.hole) {
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(d.r * 0.82, 14), dentMats.hole);
+    hole.rotation.x = -Math.PI / 2; hole.position.y = -depth * 0.9;
+    g.add(hole);
+    const glow = new THREE.Mesh(new THREE.RingGeometry(d.r * 0.86, d.r * 1.05, 16), dentMats.glow);
+    glow.rotation.x = -Math.PI / 2; glow.position.y = 0.03;
+    g.add(glow);
+  }
+  // pecahan runcing di tepi
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + Math.random();
+    const sp = new THREE.Mesh(new THREE.ConeGeometry(d.r * 0.12, d.r * 0.7, 4), dentMats.rim);
+    sp.position.set(Math.cos(a) * d.r * 1.05, d.r * 0.2, Math.sin(a) * d.r * 1.05);
+    sp.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9);
+    g.add(sp);
+  }
+  g.name = 'dent';
+  return g;
+}
+function holeInside(d: Dent): THREE.Group {
+  const g = new THREE.Group();
+  const n = new THREE.Vector3(d.n[0], d.n[1], d.n[2]);
+  g.position.set(d.p[0] - n.x * 0.34, d.p[1] - n.y * 0.34, d.p[2] - n.z * 0.34);
+  g.quaternion.setFromUnitVectors(DENT_Y, n.clone().negate());
+  const dk = new THREE.Mesh(new THREE.CircleGeometry(d.r * 1.1, 16), dentMats.hole);
+  dk.rotation.x = -Math.PI / 2;
+  g.add(dk);
+  const rg = new THREE.Mesh(new THREE.RingGeometry(d.r * 1.1, d.r * 1.45, 16), dentMats.glow);
+  rg.rotation.x = -Math.PI / 2; rg.position.y = 0.01;
+  g.add(rg);
+  g.name = 'dent';
+  return g;
 }
 
 // ------------------------------------------------------------------ Habitat
 export interface HabSave {
   id: string; name: string; kind: 'station' | 'base'; bodyId?: string; dir?: [number, number, number]; yaw?: number;
   mods: { ix: number; iz: number; type: ModType; rot: number }[];
+  dmg?: DmgSave[];
 }
 
 export class Habitat {
@@ -654,6 +781,12 @@ export class Habitat {
   anim = new Map<string, number>();
   ghosts: { g: THREE.Group; v: THREE.Vector3; w: THREE.Vector3; t: number }[] = [];
   ghostRoot = new THREE.Group();
+  dmg = new Map<string, ModDamage>();
+  partGroups = new Map<string, Map<string, THREE.Group>>();
+  pressure = 1; // tekanan udara habitat 0..1 (bocor lewat lubang)
+  fx: FxSet | null = null; // partikel di ruang koordinat habitat (eksterior)
+  fxInt: FxSet | null = null; // partikel interior
+  alarm = 0;
   powerGen = 0;
   powerUse = 0;
   powerRatio = 1;
@@ -751,7 +884,7 @@ export class Habitat {
     return m;
   }
   // lepas modul + semua modul yang jadi terputus dari inti; kembalikan yang dilepas
-  detach(key: string): PlacedMod[] {
+  detach(key: string, destroyed = false): PlacedMod[] {
     const core = this.coreKey();
     if (!core || key === core) return [];
     const target = this.mods.get(key);
@@ -772,6 +905,9 @@ export class Habitat {
     // jadikan hantu: lepas melayang
     for (const m of removed) {
       const eg = this.extMods.get(m.key);
+      const dm = this.dmg.get(m.key);
+      if (destroyed && m === target) { this.dmg.delete(m.key); if (eg) { this.extMods.delete(m.key); this.ext.remove(eg); disposeTree(eg); } continue; }
+      if (dm) this.dmg.delete(m.key);
       if (eg) {
         this.extMods.delete(m.key);
         this.ext.remove(eg);
@@ -805,12 +941,14 @@ export class Habitat {
       ex.group.rotation.y = rotY;
       this.ext.add(ex.group);
       this.extMods.set(m.key, ex.group);
+      this.partGroups.set(m.key, ex.parts);
       for (const bl of ex.blinkers) this.blinkers.push(bl);
       const ix = buildInterior(m.type, openL, portL);
       ix.group.position.set(cx, 0, cz);
       ix.group.rotation.y = rotY;
       this.int.add(ix.group);
       this.intMods.set(m.key, ix.group);
+      this.applyDamageVisuals(m.key);
       this.rects.set(m.key, ix.rects);
       this.spots.set(m.key, ix.spots);
     }
@@ -824,19 +962,113 @@ export class Habitat {
     this.computePower();
   }
 
+  // ----- kerusakan
+  getDmg(key: string): ModDamage {
+    let d = this.dmg.get(key);
+    if (!d) { d = { hp: 1, fire: 0, dents: [], lost: [], dust: 0, ash: 0 }; this.dmg.set(key, d); }
+    return d;
+  }
+  hpOf(key: string) { return this.dmg.get(key)?.hp ?? 1; }
+  get worstHp() { let w = 1; for (const k of this.mods.keys()) w = Math.min(w, this.hpOf(k)); return w; }
+  get totalLeak() {
+    let leak = 0;
+    for (const [k, d] of this.dmg) if (this.mods.has(k)) for (const t of d.dents) if (t.hole) leak += t.r * t.r * 3;
+    return leak;
+  }
+  get onFire() { for (const [k, d] of this.dmg) if (this.mods.has(k) && d.fire > 0.03) return true; return false; }
+
+  private applyDamageVisuals(key: string) {
+    const d = this.dmg.get(key);
+    const eg = this.extMods.get(key);
+    const ig = this.intMods.get(key);
+    const parts = this.partGroups.get(key);
+    if (!d || !eg) return;
+    if (parts) for (const id of d.lost) { const g = parts.get(id); if (g) g.visible = false; }
+    for (const t of d.dents) { eg.add(dentMesh(t)); if (t.hole && ig) ig.add(holeInside(t)); }
+  }
+
+  addDent(key: string, t: Dent) {
+    const d = this.getDmg(key);
+    if (d.dents.length >= 12) d.dents.shift();
+    d.dents.push(t);
+    const eg = this.extMods.get(key), ig = this.intMods.get(key);
+    if (eg) {
+      // rangkai ulang agar penyok tertua yang terbuang ikut hilang
+      for (const c of [...eg.children]) if (c.name === 'dent') { eg.remove(c); disposeTree(c); }
+      if (ig) for (const c of [...ig.children]) if (c.name === 'dent') { ig.remove(c); disposeTree(c); }
+      for (const x of d.dents) { eg.add(dentMesh(x)); if (x.hole && ig) ig.add(holeInside(x)); }
+    }
+  }
+
+  /** lepaskan bagian bernama; mengembalikan salinan berpusat di titik beratnya (koordinat lokal modul) untuk dijadikan puing */
+  takePart(key: string, id?: string, near?: THREE.Vector3): { obj: THREE.Object3D; id: string; center: THREE.Vector3; radius: number } | null {
+    const parts = this.partGroups.get(key);
+    const d = this.getDmg(key);
+    if (!parts) return null;
+    const avail = [...parts.keys()].filter((k) => !d.lost.includes(k));
+    if (!avail.length) return null;
+    let pick = id && avail.includes(id) ? id : '';
+    if (!pick) {
+      if (near) {
+        let bd = 1e9;
+        for (const k of avail) { const c = parts.get(k)!.userData.center as number[]; const dd = Math.hypot(c[0] - near.x, c[1] - near.y, c[2] - near.z); if (dd < bd) { bd = dd; pick = k; } }
+      } else pick = avail[Math.floor(Math.random() * avail.length)];
+    }
+    const g = parts.get(pick)!;
+    const c = g.userData.center as number[];
+    const clone = g.clone(true);
+    clone.position.set(-c[0], -c[1], -c[2]);
+    const pivot = new THREE.Group();
+    pivot.add(clone);
+    g.visible = false;
+    d.lost.push(pick);
+    return { obj: pivot, id: pick, center: new THREE.Vector3(c[0], c[1], c[2]), radius: g.userData.radius as number };
+  }
+
+  partsLeft(key: string) { const parts = this.partGroups.get(key); const d = this.dmg.get(key); return parts ? parts.size - (d?.lost.length ?? 0) : 0; }
+
+  repairModule(key: string) {
+    const d = this.dmg.get(key);
+    if (!d) return;
+    d.hp = 1; d.fire = 0; d.dust = 0; d.ash = 0; d.dents.length = 0; d.lost.length = 0;
+    const eg = this.extMods.get(key), ig = this.intMods.get(key);
+    if (eg) { for (const c of [...eg.children]) if (c.name === 'dent') { eg.remove(c); disposeTree(c); } }
+    if (ig) { for (const c of [...ig.children]) if (c.name === 'dent') { ig.remove(c); disposeTree(c); } }
+    const parts = this.partGroups.get(key);
+    if (parts) for (const g of parts.values()) g.visible = true;
+  }
+
+  ensureFx(): FxSet { if (!this.fx) this.fx = new FxSet(this.ext, false, 300); return this.fx; }
+  ensureFxInt(): FxSet { if (!this.fxInt) this.fxInt = new FxSet(this.int, false, 220); return this.fxInt; }
+
+  /** kerusakan dari semua modul yang masih ada */
+  damagedKeys(): string[] { const out: string[] = []; for (const k of this.mods.keys()) { const d = this.dmg.get(k); if (d && (d.hp < 0.995 || d.dents.length || d.lost.length || d.fire > 0)) out.push(k); } return out; }
+
   computePower(solar = this.solarFactor) {
     this.solarFactor = solar;
     let gen = 0, use = 0;
     for (const m of this.mods.values()) {
       const d = MOD_DEFS[m.type];
-      gen += d.gen + d.solar * solar;
-      use += d.use;
+      const dm = this.dmg.get(m.key);
+      const hp = dm ? dm.hp : 1;
+      if (m.type === 'power') {
+        const panels = dm ? (dm.lost.includes('panelL') ? 0 : 0.5) + (dm.lost.includes('panelR') ? 0 : 0.5) : 1;
+        const dust = dm ? 1 - 0.75 * Math.min(1, dm.dust) : 1;
+        gen += d.gen * (hp > 0.25 ? 1 : 0) + d.solar * solar * panels * dust * Math.min(1, hp * 1.4);
+      } else gen += d.gen + d.solar * solar;
+      use += d.use * (hp < 0.15 ? 0.3 : 1);
     }
     this.powerGen = gen; this.powerUse = use;
     this.powerRatio = use <= 0 ? 1 : Math.max(0.15, Math.min(1, gen / use));
   }
 
   // ----- geometri
+  /** koordinat habitat → koordinat lokal modul (kebalikan localOf) */
+  toModuleLocal(m: PlacedMod, v: THREE.Vector3, out = new THREE.Vector3()) {
+    const th = -(m.rot * Math.PI) / 2, c = Math.cos(th), s = Math.sin(th);
+    const dx = v.x - m.ix * CELL, dz = v.z - m.iz * CELL;
+    return out.set(dx * c - dz * s, v.y, dx * s + dz * c);
+  }
   localOf(m: PlacedMod, lx: number, lz: number, out = new THREE.Vector3()) {
     const th = -(m.rot * Math.PI) / 2, c = Math.cos(th), s = Math.sin(th);
     return out.set(m.ix * CELL + lx * c + lz * s, 0, m.iz * CELL - lx * s + lz * c);
@@ -1020,6 +1252,8 @@ export class Habitat {
       const bl = this.blinkers[i];
       bl.visible = Math.floor(time * 1.4 + i * 0.37) % 2 === 0;
     }
+    if (this.fx) this.fx.update(dt);
+    if (this.fxInt) this.fxInt.update(dt);
     // suar jarak jauh
     const k = Math.min(6e4, Math.max(2.5, camDist * 0.012));
     this.beacon.scale.setScalar(k);
@@ -1032,6 +1266,7 @@ export class Habitat {
       id: this.id, name: this.name, kind: this.kind, bodyId: this.body?.id,
       dir: this.kind === 'base' ? [this.dirL.x, this.dirL.y, this.dirL.z] : undefined, yaw: this.yaw,
       mods: [...this.mods.values()].map((m) => ({ ix: m.ix, iz: m.iz, type: m.type, rot: m.rot })),
+      dmg: [...this.dmg.entries()].filter(([k, d]) => this.mods.has(k) && (d.hp < 0.999 || d.dents.length || d.lost.length)).map(([key, d]) => ({ key, hp: d.hp, fire: 0, dents: d.dents, lost: d.lost })),
     };
   }
 }

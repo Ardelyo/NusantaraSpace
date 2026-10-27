@@ -44,6 +44,11 @@ export default function BuildPanel({ engine, onClose }: { engine: Engine; onClos
     if (err) setMsg({ t: err, ok: false });
     else { setMsg({ t: `${MOD_DEFS[type].name} terpasang`, ok: true }); setSel(null); setSt(engine.getBuildState()); }
   };
+  const doRepair = (all: boolean) => {
+    const err = all ? engine.repairAllModules() : selMod ? engine.repairModule(selMod.key) : null;
+    if (err) setMsg({ t: err, ok: false });
+    else { setMsg({ t: all ? 'Semua modul diperbaiki' : 'Modul diperbaiki', ok: true }); setSt(engine.getBuildState()); }
+  };
   const doDetach = () => {
     if (!selMod) return;
     const err = engine.detachModule(selMod.key);
@@ -64,6 +69,12 @@ export default function BuildPanel({ engine, onClose }: { engine: Engine; onClos
           <div className="text-[9px] uppercase tracking-widest text-white/50">Daya · surya ×{pw.solar.toFixed(2)}</div>
         </div>
       </div>
+      {(st.pressure < 0.99 || st.mods.some((m) => m.hp < 0.995 || m.lost > 0 || m.dents > 0)) && (
+        <div className="mx-4 mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-300/40 bg-amber-900/20 px-3 py-1.5 text-[12px] text-amber-100">
+          <span>Tekanan {Math.round(st.pressure * 100)}% · {st.mods.filter((m) => m.hp < 0.995 || m.lost > 0 || m.dents > 0).length} modul rusak</span>
+          <button onClick={() => doRepair(true)} className="rounded-lg border border-emerald-300/50 bg-emerald-500/15 px-2.5 py-1 font-semibold text-emerald-100 active:scale-95">🔧 Perbaiki semua</button>
+        </div>
+      )}
       <div className="mx-4 mb-2 h-1.5 overflow-hidden rounded bg-white/10"><div className={`h-full ${pw.ratio < 0.99 ? 'bg-red-400' : 'bg-emerald-400'}`} style={{ width: `${pct}%` }} /></div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 md:flex-row" data-scroll>
@@ -86,6 +97,8 @@ export default function BuildPanel({ engine, onClose }: { engine: Engine; onClos
                   <text x={x + CS / 2} y={y + CS / 2 + 6} textAnchor="middle" fontSize="20" fill={hex(d.color)}>{d.icon}</text>
                   <text x={x + CS / 2} y={y + CS - 10} textAnchor="middle" fontSize="8.5" fill="rgba(255,255,255,0.7)">{d.name.length > 11 ? d.name.slice(0, 10) + '…' : d.name}</text>
                   {m.core && <text x={x + 10} y={y + 17} fontSize="9" fill="#ffd060">★</text>}
+                  {m.hp < 0.995 && <rect x={x + 8} y={y + CS - 8} width={(CS - 16) * m.hp} height={3} rx={1.5} fill={m.hp < 0.35 ? '#ff4a3c' : m.hp < 0.7 ? '#ffb030' : '#40ff90'} />}
+                  {m.fire > 0.03 && <text x={x + CS - 16} y={y + 28} fontSize="13">🔥</text>}
                   {here && <circle cx={x + CS - 12} cy={y + 14} r={4} fill="#40ff90" />}
                   {/* port: bar terang = tersambung, putus-putus = terbuka (tak tersambung) */}
                   {m.ports.map((p, s) => {
@@ -115,6 +128,12 @@ export default function BuildPanel({ engine, onClose }: { engine: Engine; onClos
                 <span>Port: {selMod.ports.map((p, i) => (p ? SIDE_NAMES[i][0] : '')).join('') || '—'}</span>
                 <span>Nilai kembali: ◈ {Math.round(MOD_DEFS[selMod.type].cost * 0.6)}</span>
               </div>
+              {(selMod.hp < 0.995 || selMod.lost > 0 || selMod.dents > 0 || selMod.dust > 0.05 || selMod.ash > 5) && (
+                <div className="mt-2 rounded-xl border border-amber-300/40 bg-amber-900/20 p-2 text-[12px] text-amber-100">
+                  <div>Integritas <b>{Math.round(selMod.hp * 100)}%</b>{selMod.fire > 0.03 ? ' · 🔥 terbakar' : ''}{selMod.lost > 0 ? ` · ${selMod.lost} bagian lepas` : ''}{selMod.dents > 0 ? ` · ${selMod.dents} penyok/lubang` : ''}{selMod.dust > 0.05 ? ` · debu ${Math.round(selMod.dust * 100)}%` : ''}{selMod.ash > 5 ? ` · abu ${Math.round(selMod.ash)} kg/m²` : ''}</div>
+                  <button disabled={st.credits < selMod.repair} onClick={() => doRepair(false)} className="mt-1.5 w-full rounded-lg border border-emerald-300/50 bg-emerald-500/15 py-2 text-sm font-semibold text-emerald-100 active:scale-95 disabled:opacity-40">🔧 Perbaiki · ◈ {selMod.repair}</button>
+                </div>
+              )}
               <button disabled={selMod.core} onClick={doDetach} className="mt-3 w-full rounded-xl border border-red-400/60 bg-red-500/15 py-2.5 text-sm font-semibold text-red-100 active:scale-95 disabled:opacity-35">
                 {selMod.core ? 'Hub inti tidak dapat dilepas' : '⏏ Lepas modul (beserta cabang yang terputus)'}
               </button>

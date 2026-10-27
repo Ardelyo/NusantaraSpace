@@ -265,6 +265,7 @@ export default function App() {
           {h.glare > 0.02 && <div className="pointer-events-none absolute inset-0 z-[6]" style={{ opacity: h.glare * 0.75, background: 'radial-gradient(circle at 50% 45%, rgba(255,250,235,0.95), rgba(255,230,180,0.3) 55%, rgba(255,200,120,0) 85%)' }} />}
           {h.gasDepth > 0.01 && <div className="pointer-events-none absolute inset-0 z-[6] bg-black" style={{ opacity: Math.min(0.6, h.gasDepth * 25) }} />}
           {flash > 0 && <div className="pointer-events-none absolute inset-0 z-[7] bg-white" style={{ opacity: flash }} />}
+          {h.destroyed && <div className="pointer-events-none absolute inset-0 z-[9] bg-red-900/30" />}
           {h.lightning > 0.02 && <div className="pointer-events-none absolute inset-0 z-[7] bg-white" style={{ opacity: h.lightning * 0.85 }} />}
           {stormTint && wk > 0.02 && !inHab && <div className="pointer-events-none absolute inset-0 z-[6]" style={{ background: `radial-gradient(ellipse at 50% 60%, rgba(${stormTint},${0.1 * wk}) 20%, rgba(${stormTint},${0.38 * wk}) 100%)` }} />}
           {h.radiation > 0.04 && <div className="pointer-events-none absolute inset-0 z-[8] rad-fx" style={{ opacity: Math.min(0.85, h.radiation * (eva ? 0.9 : 0.5)) }} />}
@@ -361,6 +362,12 @@ export default function App() {
               </div>
             )}
             {h.link && pilot && <div className="max-w-full truncate rounded-full border border-emerald-300/50 bg-emerald-900/45 px-3 py-1 font-mono text-[11px] text-emerald-100">⚓ {h.link.docked ? 'Tersandar' : 'Dekat'}: {h.link.name}</div>}
+            {h.habStat && (h.habStat.damaged > 0 || h.habStat.pressure < 0.97 || h.habStat.fire) && (
+              <div className={`max-w-full rounded-2xl border px-3 py-1 text-center font-mono text-[11px] leading-snug backdrop-blur ${h.habStat.fire || h.habStat.pressure < 0.6 ? 'warn-pulse border-red-400/70 bg-red-900/55 text-red-100' : 'border-amber-300/60 bg-amber-900/45 text-amber-100'}`}>
+                {h.habStat.fire ? '🔥 API! ' : ''}{h.habStat.leak ? '💨 BOCOR ' : ''}Tekanan {Math.round(h.habStat.pressure * 100)}% · struktur {Math.round(h.habStat.hp * 100)}% · {h.habStat.damaged} modul rusak
+              </div>
+            )}
+            {pilot && h.parts.lost.length > 0 && <div className="max-w-full rounded-2xl border border-amber-300/60 bg-amber-900/45 px-3 py-1 text-center font-mono text-[11px] leading-snug text-amber-100">🔧 Hilang: {Object.entries(h.parts.lost.reduce<Record<string, number>>((m, n) => { m[n] = (m[n] || 0) + 1; return m; }, {})).map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(', ')}</div>}
             {h.warpNow > 1 && <div className="rounded-full border border-fuchsia-300/60 bg-fuchsia-900/45 px-3 py-1 font-mono text-[11px] text-fuchsia-100">⏩ waktu ×{h.warpNow}</div>}
             {pilot && (h.hold || h.landAssist) && <div className="rounded-full border border-emerald-300/50 bg-emerald-900/45 px-3 py-1 font-mono text-[11px] text-emerald-100">{h.landAssist ? '⬇ pendaratan otomatis' : '✋ tahan posisi'}</div>}
             {h.scanning && <div className="rounded-full border border-cyan-300/50 bg-cyan-900/45 px-3 py-1 font-mono text-[11px] text-cyan-100">⌖ Memindai…</div>}
