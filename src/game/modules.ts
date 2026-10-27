@@ -190,8 +190,14 @@ function buildInterior(type: ModType, openL: boolean[], portL: boolean[]): IntOu
       const seg = (CELL - DOOR_W) / 2;
       for (const sg of [-1, 1]) put(sg * (DOOR_W / 2 + seg / 2), 1.2, seg, 2.4, t, hull);
       put(0, 2.7, CELL, 0.6, t, hull);
-      for (const sg of [-1, 1]) put(sg * DOOR_W / 2, 1.2, 0.08, 2.4, t + 0.05, accM);
-      put(0, 2.4, DOOR_W + 0.08, 0.08, t + 0.05, accM);
+      // bingkai tipis + strip lampu + daun pintu geser yang terbuka separuh
+      for (const sg of [-1, 1]) {
+        put(sg * (DOOR_W / 2 + 0.03), 1.2, 0.06, 2.4, t + 0.04, dark);
+        put(sg * DOOR_W / 2, 1.2, 0.015, 2.34, t + 0.055, accM);
+        put(sg * (DOOR_W / 2 - 0.13), 1.15, 0.26, 2.25, 0.05, L(0x39414c));
+      }
+      put(0, 2.43, DOOR_W + 0.12, 0.08, t + 0.04, dark);
+      put(0, 2.39, DOOR_W, 0.015, t + 0.055, accM);
     } else {
       put(0, 0.45, CELL, 0.9, t, hull);
       put(0, 2.7, CELL, 0.6, t, hull);
@@ -315,11 +321,13 @@ function buildInterior(type: ModType, openL: boolean[], portL: boolean[]): IntOu
     }
     case 'hab': {
       for (const [bx, bz, k] of [[-2.2, -1.3, 0], [-2.2, 1.3, 1]] as [number, number, number][]) {
-        b.box(1.0, 0.18, 2.0, bx, 0.45, bz, hullD);
-        b.box(0.94, 0.14, 1.9, bx, 0.6, bz, k ? L(0x9fb1c6) : L(0xc9ccd2));
-        b.box(0.94, 0.1, 1.1, bx, 0.7, bz + 0.45, k ? fabB : fab);
-        b.box(0.5, 0.1, 0.32, bx, 0.74, bz - 0.7, L(0xeeeeee));
-        b.box(0.04, 0.4, 2.0, bx - 0.5, 0.2, bz, hullD);
+        for (const lx of [-0.45, 0.45]) for (const lz of [-0.93, 0.93]) b.box(0.06, 0.36, 0.06, bx + lx, 0.18, bz + lz, metal);
+        b.box(1.0, 0.08, 2.0, bx, 0.4, bz, hullD);
+        b.box(0.94, 0.14, 1.92, bx, 0.51, bz, k ? L(0x9fb1c6) : L(0xc9ccd2));
+        b.box(0.9, 0.06, 1.1, bx, 0.61, bz + 0.45, k ? fabB : fab);
+        b.box(0.5, 0.09, 0.3, bx, 0.62, bz - 0.7, L(0xeeeeee));
+        b.box(1.0, 0.55, 0.06, bx, 0.65, bz + (k ? 1.0 : -1.0), hullD);
+        b.box(0.04, 0.02, 1.9, bx + 0.5, 0.58, bz, k ? amber : cyan);
         rect(bx - 0.55, bx + 0.55, bz - 1.05, bz + 1.05);
       }
       b.box(0.5, 0.05, 1.6, 2.55, 0.85, -0.6, hullD);

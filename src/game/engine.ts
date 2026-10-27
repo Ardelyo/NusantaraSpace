@@ -1446,14 +1446,13 @@ export class Engine {
     }
     if (fl && !fl.warned) {
       fl.warned = true;
-      this.toast(`${HAZARDS.flare.icon} Semburan Surya! Berlindung di kapal atau habitat`, 'warn');
       this.audio.warn();
     }
     // peringatan dini
     const fc = this.hazards.forecast(hb ? hb.id : null);
     if (fc && !fc.active && fc.in < 22) {
       const key = fc.type + ':' + Math.floor(this.time / 60);
-      if (key !== this.forecastKey) { this.forecastKey = key; this.toast(`Peringatan: ${fc.icon} ${fc.label} dalam ± ${Math.ceil(fc.in)} dtk`, 'warn'); this.audio.warn(); }
+      if (key !== this.forecastKey) { this.forecastKey = key; this.audio.warn(); }
     }
     this.quakeK = a && a.type === 'quake' ? a.k : 0;
     this.radiation = fl ? fl.k : 0;
