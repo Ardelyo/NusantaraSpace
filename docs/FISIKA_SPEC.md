@@ -210,3 +210,16 @@ Langkah 1–3 mengubah inti simulasi dan harus diuji ulang secara menyeluruh. La
 - [NASA NTRS — Sutton & Graves 1971](https://ntrs.nasa.gov/citations/19720003329)
 - [Wikipedia — Planar reentry equations](https://en.wikipedia.org/wiki/Planar_reentry_equations)
 - [Wikipedia — Roche limit](https://en.wikipedia.org/wiki/Roche_limit)
+
+## Status implementasi (v2)
+
+| Area | Status | Verifikasi |
+|---|---|---|
+| Orbit Kepler, SOI, gravitasi nyata (μ=gR²) | Selesai | `npm test` (42 pernyataan) + uji dalam-mesin: orbit lingkaran dengan warp ×500, Δr/r < 2·10⁻⁵ |
+| Drag, tekanan dinamis, pemanasan Sutton–Graves, termal kabin | Selesai | `tests/physics.test.ts` |
+| Kerusakan benturan berbasis energi (aman ≤ 5,8 m/s; 20 m/s ≈ 41%) | Selesai | uji jatuh ke Bulan: lambung 0,581 vs 0,593 teoretis |
+| Pendaratan otomatis (profil kecepatan + umpan-maju) | Selesai | mendarat dari 5 km, lambung 100% |
+| Sandar/lepas sandar dengan kecepatan relatif | Selesai | uji headless: sandar, tahan, lepas 3 m/s |
+| Stasiun pada orbit Kepler, orientasi LVLH | Selesai | — |
+| Kecepatan jatuh hujan (asam 7, badai 9, metana 3 m/s) | Selesai | — |
+| Densitas Mars ρ₀ | 0,0155 kg/m³ (tekanan 610 Pa); angka 0,02 pada draf awal sudah diganti | — |
